@@ -26,18 +26,20 @@ class ConvertToMultiChannelBasedOnBratsClassesd(monai.transforms.MapTransform):
     def __init__(
         self,
         keys: monai.config.KeysCollection,
-        is2019: bool = False,
+        brain_type: str = "is2019",
         allow_missing_keys: bool = False,
     ):
         super().__init__(keys, allow_missing_keys)
-        self.is2019 = is2019
+        self.brain_type = brain_type
 
     def converter(self, img: monai.config.NdarrayOrTensor):
         # TC WT ET
         # if img has channel dim, squeeze it
         if img.ndim == 4 and img.shape[0] == 1:
             img = img.squeeze(0)
-        if self.is2019:
+        if self.brain_type == "acute":
+            result = [(img == 1)]
+        elif self.brain_type == "is2019":
             result = [
                 (img == 2) | (img == 3),
                 (img == 1) | (img == 2) | (img == 3),
@@ -133,16 +135,35 @@ def load_brats2019_dataset_images(root):
     return images_list
 
 
+class PrintShape:
+
+    def __init__(self) -> None:
+        print("PrintShape")
+
+    def __call__(
+        self, input_, start=0, end=None, threading=False, lazy: bool | None = None
+    ):
+
+        print(input_["image"].shape, input_["label"].shape)
+
+        return input_
+
+
 def get_Brats_transforms(
     config: EasyDict,
 ) -> Tuple[monai.transforms.Compose, monai.transforms.Compose]:
+
+    brain_type = "acute"
+    if hasattr(config.trainer, "is_brats2019"):
+        brain_type = "is2019" if config.trainer.is_brats2019 else "is2021"
+
     train_transform = monai.transforms.Compose(
         [
             monai.transforms.LoadImaged(keys=["image", "label"]),
             monai.transforms.EnsureChannelFirstd(keys="image"),
             monai.transforms.EnsureTyped(keys=["image", "label"]),
             ConvertToMultiChannelBasedOnBratsClassesd(
-                keys=["label"], is2019=config.trainer.is_brats2019
+                keys=["label"], brain_type="is2019"
             ),
             monai.transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
             monai.transforms.SpatialPadD(
@@ -156,34 +177,62 @@ def get_Brats_transforms(
                 pixdim=(1.0, 1.0, 1.0),
                 mode=("bilinear", "nearest"),
             ),
+            monai.transforms.RandRotated(
+                keys=["image", "label"],
+                prob=config.trainer.rot_prob,
+                range_z=0.1 * np.pi,
+            ),
             monai.transforms.CenterSpatialCropD(
                 keys=["image", "label"],
                 roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
             ),
-            monai.transforms.RandCropByPosNegLabeld(
+            monai.transforms.NormalizeIntensityd(
+                keys="image", nonzero=True, channel_wise=True
+            ),
+        ]
+    )
+
+    val_transform = monai.transforms.Compose(
+        [
+            monai.transforms.LoadImaged(keys=["image", "label"]),
+            monai.transforms.EnsureChannelFirstd(keys="image"),
+            monai.transforms.EnsureTyped(keys=["image", "label"]),
+            ConvertToMultiChannelBasedOnBratsClassesd(
+                keys=["label"], brain_type="is2019"
+            ),
+            monai.transforms.CenterSpatialCropD(
                 keys=["image", "label"],
-                label_key="label",
-                num_samples=2,
-                spatial_size=ensure_tuple_rep(config.trainer.image_size, 3),
-                pos=1,
-                neg=1,
-                image_key="image",
-                image_threshold=0,
-            ),
-            monai.transforms.RandFlipd(
-                keys=["image", "label"], prob=0.5, spatial_axis=0
-            ),
-            monai.transforms.RandFlipd(
-                keys=["image", "label"], prob=0.5, spatial_axis=1
-            ),
-            monai.transforms.RandFlipd(
-                keys=["image", "label"], prob=0.5, spatial_axis=2
+                roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
             ),
             monai.transforms.NormalizeIntensityd(
                 keys="image", nonzero=True, channel_wise=True
             ),
-            monai.transforms.RandScaleIntensityd(keys="image", factors=0.1, prob=1.0),
-            monai.transforms.RandShiftIntensityd(keys="image", offsets=0.1, prob=1.0),
+        ]
+    )
+
+    return train_transform, val_transform
+
+
+##
+
+
+def get_Acute_transforms(
+    config: EasyDict,
+) -> Tuple[monai.transforms.Compose, monai.transforms.Compose]:
+
+    train_transform = monai.transforms.Compose(
+        [
+            monai.transforms.LoadImaged(keys=["image", "label"]),
+            monai.transforms.EnsureChannelFirstd(keys="image"),
+            monai.transforms.EnsureTyped(keys=["image", "label"]),
+            monai.transforms.RandRotated(
+                keys=["image", "label"],
+                prob=config.trainer.rot_prob,
+                range_z=0.1 * np.pi,
+            ),
+            # monai.transforms.NormalizeIntensityd(
+            #     keys="image", nonzero=True, channel_wise=True
+            # ),
             monai.transforms.ToTensord(keys=["image", "label"]),
         ]
     )
@@ -192,18 +241,10 @@ def get_Brats_transforms(
             monai.transforms.LoadImaged(keys=["image", "label"]),
             monai.transforms.EnsureChannelFirstd(keys="image"),
             monai.transforms.EnsureTyped(keys=["image", "label"]),
-            ConvertToMultiChannelBasedOnBratsClassesd(
-                keys="label", is2019=config.trainer.is_brats2019
-            ),
-            monai.transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
-            monai.transforms.Spacingd(
-                keys=["image", "label"],
-                pixdim=(1.0, 1.0, 1.0),
-                mode=("bilinear", "nearest"),
-            ),
-            monai.transforms.NormalizeIntensityd(
-                keys="image", nonzero=True, channel_wise=True
-            ),
+            # monai.transforms.NormalizeIntensityd(
+            #     keys="image", nonzero=True, channel_wise=True
+            # ),
+            monai.transforms.ToTensord(keys=["image", "label"]),
         ]
     )
     return train_transform, val_transform
@@ -290,7 +331,6 @@ def get_MSD_transforms(
             monai.transforms.CropForegroundd(
                 keys=["image", "label"], source_key="image"
             ),
-            # 强度限制
             monai.transforms.ScaleIntensityRanged(
                 keys=["image", "label"],
                 a_min=0.0,
@@ -309,24 +349,29 @@ def get_MSD_transforms(
 def get_dataloader(
     config: EasyDict, data_flag: str
 ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
-    if data_flag == "hepatic_vessel2021":
+    if data_flag in ["hepatic_vessel2021", "heart"]:
         train_images = load_dataset_images(config.data_root)
         train_transform, val_transform = get_MSD_transforms(config)
     else:
-        if data_flag == "brain2019":
+        if data_flag in ["brain2019", "brain2019_small"]:
             train_images = load_brats2019_dataset_images(config.data_root)
             config.trainer.is_brats2019 = True
+            train_transform, val_transform = get_Brats_transforms(config)
+        elif data_flag in ["acute", "lung", "lung_big_model", "tbad_dataset"]:
+            train_images = load_dataset_images(config.data_root)
+            train_transform, val_transform = get_Acute_transforms(config)
         else:
             train_images = load_brats2021_dataset_images(config.data_root)
             config.trainer.is_brats2019 = False
-        train_transform, val_transform = get_Brats_transforms(config)
+            train_transform, val_transform = get_Brats_transforms(config)
 
+    train_lentgh = int(len(train_images) * config.trainer.train_ratio)
     train_dataset = monai.data.Dataset(
-        data=train_images[: int(len(train_images) * config.trainer.train_ratio)],
+        data=train_images[:train_lentgh],
         transform=train_transform,
     )
     val_dataset = monai.data.Dataset(
-        data=train_images[int(len(train_images) * config.trainer.train_ratio) :],
+        data=train_images[train_lentgh:],
         transform=val_transform,
     )
 
@@ -341,6 +386,7 @@ def get_dataloader(
         batch_size = 1
     else:
         batch_size = config.trainer.batch_size
+
     val_loader = monai.data.DataLoader(
         val_dataset,
         num_workers=config.trainer.num_workers,

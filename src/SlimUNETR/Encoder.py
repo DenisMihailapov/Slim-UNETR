@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from src.SlimUNETR.Slim_UNETR_Block import Block
+from .Slim_UNETR_Block import Block
 
 
 class DepthwiseConvLayer(nn.Module):
@@ -21,12 +21,11 @@ class Encoder(nn.Module):
         self,
         in_channels=4,
         embed_dim=384,
-        embedding_dim=27,
+        embedding_dim=64,
         channels=(48, 96, 240),
         blocks=(1, 2, 3, 2),
         heads=(1, 2, 4, 8),
         r=(4, 2, 2, 1),
-        dropout=0.3,
     ):
         super(Encoder, self).__init__()
         self.DWconv1 = DepthwiseConvLayer(dim_in=in_channels, dim_out=channels[0], r=4)
@@ -52,7 +51,6 @@ class Encoder(nn.Module):
         self.position_embeddings = nn.Parameter(
             torch.zeros(1, embedding_dim, embed_dim)
         )
-        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         hidden_states_out = []
@@ -70,5 +68,5 @@ class Encoder(nn.Module):
         x = self.block4(x)
         x = x.flatten(2).transpose(-1, -2)
         x = x + self.position_embeddings
-        x = self.dropout(x)
+
         return x, hidden_states_out, (B, C, W, H, Z)

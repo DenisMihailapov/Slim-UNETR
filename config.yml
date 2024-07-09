@@ -1,14 +1,26 @@
 is_brats2021: False
-is_brain2019: False
-is_hepatic_vessel2021: True
+is_brain2019: False #True
+is_brain2019_small: False
+is_hepatic_vessel2021: False
+is_heart: False
+
+is_acute: False
+
+is_lung: False 
+is_lung_big_model: False
+
+is_tbad_dataset: True
+
+
 
 brats2021:
-  data_root: /dataset/cv/seg/BRaTS2021/
+  data_root: ../med_data/common/BRaTS2021
   trainer:
+    seed: 50
     num_epochs: 300
     warmup: 5
     train_ratio: 0.8
-    batch_size: 16
+    batch_size: 8
     lr: 0.001
     min_lr: 0.0000001
     optimizer: adamw
@@ -16,7 +28,7 @@ brats2021:
     weight_decay_end: 0.04
     momentum_teacher: 0.996
     pred_ratio_var: 0
-    num_workers: 16
+    num_workers: 0
     image_size: 128
     resume: False
 
@@ -35,12 +47,13 @@ brats2021:
     dropout: 0.3
 
 brain2019:
-  data_root: /dataset/cv/seg/MSD/Task01_Brain/
+  data_root: ../med_data/common/Task01_BrainTumour
   trainer:
+    seed: 50
     num_epochs: 300
     warmup: 5
     train_ratio: 0.8
-    batch_size: 16
+    batch_size: 4
     lr: 0.001
     min_lr: 0.0000001
     optimizer: adamw
@@ -48,10 +61,11 @@ brain2019:
     weight_decay_end: 0.04
     momentum_teacher: 0.996
     pred_ratio_var: 0
-    num_workers: 16
+    num_workers: 0
+    rot_prob: 0.7
     
     image_size: 128
-    resume: False
+    resume: True
 
   finetune:
     checkpoint: brain2019
@@ -64,14 +78,16 @@ brain2019:
     channels: [ 24, 48, 60 ]
     blocks: [ 1, 2, 3, 2 ]
     heads: [ 1, 2, 4, 4 ]
-    r: [ 4, 2, 2, 1 ]
+    r: [ 4, 2, 2, 2 ]
     dropout: 0.3
     
 
-hepatic_vessel2021:
-  data_root: /dataset/cv/seg/MSD/Task08_HepaticVessel/
+
+brain2019_small:
+  data_root: ../med_data/common/Task01_BrainTumour_small
   trainer:
-    num_epochs: 1000
+    seed: 50
+    num_epochs: 300
     warmup: 5
     train_ratio: 0.8
     batch_size: 16
@@ -82,7 +98,43 @@ hepatic_vessel2021:
     weight_decay_end: 0.04
     momentum_teacher: 0.996
     pred_ratio_var: 0
-    num_workers: 16
+    num_workers: 0
+    rot_prob: 0.7
+    
+    image_size: 128
+    resume: True
+
+  finetune:
+    checkpoint: brain2019_small
+  
+  slim_unetr:
+    in_channels: 4
+    out_channels: 3
+    embed_dim: 96 
+    embedding_dim: 64 
+    channels: [ 24, 48, 60 ]
+    blocks: [ 1, 2, 3, 2 ]
+    heads: [ 1, 2, 4, 4 ]
+    r: [ 4, 2, 2, 2 ]
+    dropout: 0.3
+
+
+hepatic_vessel2021:
+  data_root: ../med_data/common/Task08_HepaticVessel
+  trainer:
+    seed: 50
+    num_epochs: 1000
+    warmup: 5
+    train_ratio: 0.8
+    batch_size: 8
+    lr: 0.001
+    min_lr: 0.0000001
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
     
     image_size: 96
     resume: False
@@ -102,6 +154,184 @@ hepatic_vessel2021:
     dropout: 0.3
 
 
+heart:
+  data_root: ../med_data/common/Task02_Heart
+  trainer:
+    seed: 50
+    num_epochs: 1000
+    warmup: 5
+    train_ratio: 0.8
+    batch_size: 8
+    lr: 0.001
+    min_lr: 0.0000001
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
+    rot_prob: 0.7
+    
+    image_size: 96
+    resume: False
+
+  finetune:
+    checkpoint: heart
+
+  slim_unetr:
+    in_channels: 1
+    out_channels: 2
+    embed_dim: 96 
+    embedding_dim: 27 
+    channels: [ 24, 48, 60 ]
+    blocks: [ 1, 2, 3, 2 ]
+    heads: [ 1, 2, 4, 4 ]
+    r: [ 4, 2, 2, 1 ]
+    dropout: 0.3
+
+acute:
+  data_root: ../med_data/3d_dataset_128__02-02-24_msd_nii_rslabels_im
+  trainer:
+    seed: 50
+    num_epochs: 1800
+    warmup: 50
+    train_ratio: 0.8
+    batch_size: 16
+    lr: 0.001
+    min_lr: 0.000005
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
+    rot_prob: 0.7
+    
+    image_size: 128
+    resume: True
 
 
+  finetune:
+    checkpoint: acute
 
+  slim_unetr:
+    in_channels: 1
+    out_channels: 1
+    embed_dim: 96 
+    embedding_dim: 64 
+    channels: [ 24, 48, 60 ]
+    blocks: [ 1, 2, 3, 2 ]
+    heads: [ 1, 2, 4, 4 ]
+    r: [ 4, 2, 2, 1 ]
+    dropout: 0.3
+
+
+lung:
+  data_root: ../med_data/common/Task06_Lung_rs
+  trainer:
+    seed: 50
+    num_epochs: 1800
+    warmup: 50
+    train_ratio: 0.8
+    batch_size: 16
+    lr: 0.001
+    min_lr: 0.000005
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
+    rot_prob: 0.7
+    
+    image_size: 128
+    resume: True
+
+
+  finetune:
+    checkpoint: lung
+
+  slim_unetr:
+    in_channels: 1
+    out_channels: 1
+    embed_dim: 96 
+    embedding_dim: 64 
+    channels: [ 24, 48, 60 ]
+    blocks: [ 1, 2, 3, 2 ]
+    heads: [ 1, 2, 4, 4 ]
+    r: [ 4, 2, 2, 1 ]
+    dropout: 0.3
+
+
+lung_big_model:
+  data_root: ../med_data/common/Task06_Lung_rs
+  trainer:
+    seed: 50
+    num_epochs: 1800
+    warmup: 100
+    train_ratio: 0.8
+    batch_size: 16
+    lr: 0.001
+    min_lr: 0.000005
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
+    rot_prob: 0.8
+    
+    image_size: 128
+    resume: True
+
+
+  finetune:
+    checkpoint: lung_big_blocks
+
+  slim_unetr:
+    in_channels: 1
+    out_channels: 1
+    embed_dim: 96 
+    embedding_dim: 64 
+    channels: [ 24, 64, 96 ]
+    blocks: [ 2, 3, 4, 3 ]
+    heads: [ 1, 2, 4, 4  ]
+    r: [ 4, 2, 2, 1 ]
+    dropout: 0.3
+
+
+tbad_dataset:
+  data_root: ../med_data/common/imageTBAD_MSD_rs
+  trainer:
+    seed: 50
+    num_epochs: 600
+    warmup: 40
+    train_ratio: 0.8
+    batch_size: 8
+    lr: 0.001
+    min_lr: 0.000005
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
+    rot_prob: 0.8
+    
+    image_size: 128
+    resume: True
+
+
+  finetune:
+    checkpoint: tbad_dataset
+
+  slim_unetr:
+    in_channels: 1
+    out_channels: 3
+    embed_dim: 96 
+    embedding_dim: 64 
+    channels: [ 24, 64, 96 ]
+    blocks: [ 2, 3, 4, 3 ]
+    heads: [ 1, 2, 4, 4  ]
+    r: [ 4, 2, 2, 1 ]
+    dropout: 0.3    

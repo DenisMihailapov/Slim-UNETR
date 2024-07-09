@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from src.SlimUNETR.Slim_UNETR_Block import Block
+from .Slim_UNETR_Block import Block
 
 
 class TransposedConvLayer(nn.Module):
@@ -24,7 +24,6 @@ class Decoder(nn.Module):
         blocks=(1, 2, 3, 2),
         heads=(1, 2, 4, 8),
         r=(4, 2, 2, 1),
-        dropout=0.3,
     ):
         super(Decoder, self).__init__()
         self.SegHead = TransposedConvLayer(

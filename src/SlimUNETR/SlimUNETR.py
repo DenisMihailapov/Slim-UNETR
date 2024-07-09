@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from src.SlimUNETR.Decoder import Decoder
-from src.SlimUNETR.Encoder import Encoder
+from .Decoder import Decoder
+from .Encoder import Encoder
 
 
 class SlimUNETR(nn.Module):
@@ -38,7 +38,7 @@ class SlimUNETR(nn.Module):
 
         """
         super(SlimUNETR, self).__init__()
-        self.Encoder = Encoder(
+        self.encoder = Encoder(
             in_channels=in_channels,
             embed_dim=embed_dim,
             embedding_dim=embedding_dim,
@@ -46,36 +46,49 @@ class SlimUNETR(nn.Module):
             blocks=blocks,
             heads=heads,
             r=r,
-            dropout=dropout,
         )
-        self.Decoder = Decoder(
+        self.dropout = nn.Dropout(dropout)
+        self.decoder = Decoder(
             out_channels=out_channels,
             embed_dim=embed_dim,
             channels=channels,
             blocks=blocks,
             heads=heads,
             r=r,
-            dropout=dropout,
         )
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
+
+        self.hidden_states_out = list()
 
     def forward(self, x):
-        embeding, hidden_states_out, (B, C, W, H, Z) = self.Encoder(x)
-        x = self.Decoder(embeding, hidden_states_out, (B, C, W, H, Z))
+
+        embeding, self.hidden_states_out, data_shape = self.encoder(x)
+
+        # print(x.shape)
+        # for h in self.hidden_states_out:
+        #     print(h.shape)
+        # print(embeding.shape, data_shape)  # (B, C, W, H, Z)
+
+        embeding = self.dropout(embeding)
+
+        x = self.decoder(embeding, self.hidden_states_out, data_shape)
+        self.hidden_states_out = [x] + self.hidden_states_out
+
+        x = self.leaky_relu(x)
         return x
 
 
 if __name__ == "__main__":
-    x = torch.randn(size=(1, 4, 128, 128, 128))
+    x = torch.randn(size=(1, 1, 128, 128, 128))
     model = SlimUNETR(
-        in_channels=4,
-        out_channels=3,
+        in_channels=1,
+        out_channels=1,
         embed_dim=96,
         embedding_dim=64,
         channels=(24, 48, 60),
         blocks=(1, 2, 3, 2),
         heads=(1, 2, 4, 4),
         r=(4, 2, 2, 1),
-        distillation=False,
         dropout=0.3,
     )
     print(model(x).shape)
