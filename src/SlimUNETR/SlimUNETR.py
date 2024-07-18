@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .Decoder import Decoder
+from .Decoder import Decoder, SplitClassDecoder
 from .Encoder import Encoder
 
 
@@ -17,6 +17,7 @@ class SlimUNETR(nn.Module):
         heads=(1, 2, 4, 4),
         r=(4, 2, 2, 1),
         dropout=0.3,
+        use_split_classes=False,
     ):
         """
         Args:
@@ -37,6 +38,9 @@ class SlimUNETR(nn.Module):
             >>> net = SlimUNETR(in_channels=1, out_channels=2, embedding_dim=27)
 
         """
+        if use_split_classes:
+            channels[0] //= 2
+
         super(SlimUNETR, self).__init__()
         self.encoder = Encoder(
             in_channels=in_channels,
@@ -48,15 +52,26 @@ class SlimUNETR(nn.Module):
             r=r,
         )
         self.dropout = nn.Dropout(dropout)
-        self.decoder = Decoder(
-            out_channels=out_channels,
-            embed_dim=embed_dim,
-            channels=channels,
-            blocks=blocks,
-            heads=heads,
-            r=r,
-        )
-        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
+
+        if use_split_classes:
+            self.decoder = SplitClassDecoder(
+                out_channels=out_channels,
+                embed_dim=embed_dim,
+                channels=channels,
+                blocks=blocks,
+                heads=heads,
+                r=r,
+            )
+        else:
+            self.decoder = Decoder(
+                out_channels=out_channels,
+                embed_dim=embed_dim,
+                channels=channels,
+                blocks=blocks,
+                heads=heads,
+                r=r,
+            )
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
 
         self.hidden_states_out = list()
 

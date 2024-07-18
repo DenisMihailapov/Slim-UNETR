@@ -32,41 +32,60 @@ class Encoder(nn.Module):
         self.DWconv2 = DepthwiseConvLayer(dim_in=channels[0], dim_out=channels[1], r=2)
         self.DWconv3 = DepthwiseConvLayer(dim_in=channels[1], dim_out=channels[2], r=2)
         self.DWconv4 = DepthwiseConvLayer(dim_in=channels[2], dim_out=embed_dim, r=2)
+
         block = []
         for _ in range(blocks[0]):
             block.append(Block(channels=channels[0], r=r[0], heads=heads[0]))
         self.block1 = nn.Sequential(*block)
+
         block = []
         for _ in range(blocks[1]):
             block.append(Block(channels=channels[1], r=r[1], heads=heads[1]))
         self.block2 = nn.Sequential(*block)
+
         block = []
         for _ in range(blocks[2]):
             block.append(Block(channels=channels[2], r=r[2], heads=heads[2]))
         self.block3 = nn.Sequential(*block)
+
         block = []
         for _ in range(blocks[3]):
             block.append(Block(channels=embed_dim, r=r[3], heads=heads[3]))
         self.block4 = nn.Sequential(*block)
+
         self.position_embeddings = nn.Parameter(
             torch.zeros(1, embedding_dim, embed_dim)
         )
 
     def forward(self, x):
+        # print(x.shape)
+
         hidden_states_out = []
         x = self.DWconv1(x)
         x = self.block1(x)
         hidden_states_out.append(x)
+        # print(x.shape)
+
         x = self.DWconv2(x)
         x = self.block2(x)
         hidden_states_out.append(x)
+        # print(x.shape)
+
         x = self.DWconv3(x)
         x = self.block3(x)
         hidden_states_out.append(x)
+        # print(x.shape)
+
         x = self.DWconv4(x)
         B, C, W, H, Z = x.shape
         x = self.block4(x)
+        hidden_states_out.append(x)
+        # print(x.shape)
+
         x = x.flatten(2).transpose(-1, -2)
+        # print(x.shape)
+
+        # print(self.position_embeddings.shape)
         x = x + self.position_embeddings
 
         return x, hidden_states_out, (B, C, W, H, Z)
