@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import sys
-from typing import Dict
+from typing import Dict, Tuple
 from easydict import EasyDict
 
 from objprint import objstr
@@ -24,7 +24,8 @@ def calc_total_loss(logits, label, loss_functions):
     log = ""
     total_loss = 0
     for name in loss_functions:
-        loss = loss_functions[name](logits, label)
+        loss_fn, ratio = loss_functions[name]
+        loss = ratio * loss_fn(logits, label)
         accelerator.log({"Train/" + name: float(loss)}, step=step)
         log += f" {name} {float(loss):1.5f} "
         total_loss += loss
@@ -88,7 +89,7 @@ def train_one_epoch(
     model: torch.nn.Module,
     config: EasyDict,
     data_flag: str,
-    loss_functions: Dict[str, torch.nn.modules.loss._Loss],
+    loss_functions: Dict[str, Tuple[torch.nn.modules.loss._Loss, float]],
     train_loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler._LRScheduler,
@@ -134,7 +135,7 @@ def train_one_epoch(
 def val_one_epoch(
     model: torch.nn.Module,
     data_flag: str,
-    loss_functions: Dict[str, torch.nn.modules.loss._Loss],
+    loss_functions: Dict[str, Tuple[torch.nn.modules.loss._Loss, float]],
     inference: monai.inferers.Inferer,
     val_loader: torch.utils.data.DataLoader,
     config: EasyDict,
@@ -153,7 +154,8 @@ def val_one_epoch(
         total_loss = 0
         log = ""
         for name in loss_functions:
-            loss = loss_functions[name](logits, image_batch["label"].to(device))
+            loss_fn, ratio = loss_functions[name]
+            loss = ratio * loss_fn(logits, image_batch["label"].to(device))
             accelerator.log({"Val/" + name: float(loss)}, step=step)
             log += f" {name} {float(loss):1.5f} "
             total_loss += loss
@@ -197,9 +199,7 @@ def get_logging_dir(config, data_flag):
 
     logging_dir /= f"epoch{config.trainer.num_epochs}"
 
-    logging_dir /= (
-        f"ims_{config.trainer.image_size}_rot_prob{config.trainer.rot_prob}_leaky_relu"
-    )
+    logging_dir /= f"ims_{config.trainer.image_size}_rot_prob{config.trainer.rot_prob}_lrelu_split_class_sigmoid_GDFL_g{gamma}"
 
     logging_dir.mkdir(parents=True, exist_ok=True)
     return logging_dir
@@ -264,12 +264,25 @@ if __name__ == "__main__":
     )
 
     loss_functions = {
-        "focal_loss": monai.losses.FocalLoss(to_onehot_y=False),
-        "dice_loss": monai.losses.DiceLoss(
-            smooth_nr=0, smooth_dr=1e-5, to_onehot_y=False, sigmoid=True
+        "focal_loss": (
+            monai.losses.FocalLoss(  # sigmoid_focal_loss FL(pt) = -alpha * (1 - pt)**gamma * log(pt)
+                to_onehot_y=False,
+                weight=config.trainer.focal_class_weights,
+                gamma=config.trainer.gamma,
+            ),
+            config.trainer.focal_loss_ratio,
+        ),
+        "gen_dice_loss": (
+            monai.losses.GeneralizedDiceLoss(
+                to_onehot_y=False,
+                sigmoid=True,
+                smooth_nr=1e-5,
+                smooth_dr=1e-5,
+            ),
+            config.trainer.dice_loss_ratio,
         ),
         # "tversky_loss": monai.losses.TverskyLoss(
-        #     to_onehot_y=False, sigmoid=True, alpha=0.4, beta=0.6
+        #     to_onehot_y=False, sigmoid=True, alpha=0.8, beta=0.5
         # ),
     }
 
@@ -298,7 +311,9 @@ if __name__ == "__main__":
 
     model.apply(_weights_init)
 
-    base_exp_path = f"{os.getcwd()}/model_store/{config.finetune.checkpoint}/seed{config.trainer.seed}/epoch{config.trainer.num_epochs}/ims_{config.trainer.image_size}_rot_prob{config.trainer.rot_prob}_leaky_relu"
+    base_exp_path = f"{os.getcwd()}/model_store/{config.finetune.checkpoint}/seed{config.trainer.seed}/epoch{config.trainer.num_epochs}/"
+
+    base_exp_path += f"ims_{config.trainer.image_size}_rot_prob{config.trainer.rot_prob}_lrelu_split_class_sigmoid_GD_FL_g{gamma}"
 
     # resume training
     if config.trainer.resume:

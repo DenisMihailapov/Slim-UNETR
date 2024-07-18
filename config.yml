@@ -317,6 +317,11 @@ tbad_dataset:
     pred_ratio_var: 0
     num_workers: 0
     rot_prob: 0.8
+
+    dice_loss_ratio: 1.
+    focal_class_weights: [0.7, 0.7, 2.0]
+    focal_loss_ratio: 0.6
+    gamma: 2.0
     
     image_size: 128
     resume: True
