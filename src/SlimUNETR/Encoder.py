@@ -26,12 +26,13 @@ class Encoder(nn.Module):
         blocks=(1, 2, 3, 2),
         heads=(1, 2, 4, 8),
         r=(4, 2, 2, 1),
+        r_up=(4, 2, 2, 2)
     ):
         super(Encoder, self).__init__()
-        self.DWconv1 = DepthwiseConvLayer(dim_in=in_channels, dim_out=channels[0], r=4)
-        self.DWconv2 = DepthwiseConvLayer(dim_in=channels[0], dim_out=channels[1], r=2)
-        self.DWconv3 = DepthwiseConvLayer(dim_in=channels[1], dim_out=channels[2], r=2)
-        self.DWconv4 = DepthwiseConvLayer(dim_in=channels[2], dim_out=embed_dim, r=2)
+        self.DWconv1 = DepthwiseConvLayer(dim_in=in_channels, dim_out=channels[0], r=r_up[0])
+        self.DWconv2 = DepthwiseConvLayer(dim_in=channels[0], dim_out=channels[1], r=r_up[1])
+        self.DWconv3 = DepthwiseConvLayer(dim_in=channels[1], dim_out=channels[2], r=r_up[2])
+        self.DWconv4 = DepthwiseConvLayer(dim_in=channels[2], dim_out=embed_dim, r=r_up[3])
 
         block = []
         for _ in range(blocks[0]):

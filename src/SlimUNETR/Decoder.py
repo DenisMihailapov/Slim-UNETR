@@ -25,14 +25,15 @@ class Decoder(nn.Module):
         blocks=(1, 2, 3, 2),
         heads=(1, 2, 4, 8),
         r=(4, 2, 2, 1),
+        r_up=(4, 2, 2, 2)
     ):
         super(Decoder, self).__init__()
         self.SegHead = TransposedConvLayer(
-            dim_in=channels[0], dim_out=out_channels, r=4
+            dim_in=channels[0], dim_out=out_channels, r=r_up[0]
         )
-        self.TSconv3 = TransposedConvLayer(dim_in=channels[1], dim_out=channels[0], r=2)
-        self.TSconv2 = TransposedConvLayer(dim_in=channels[2], dim_out=channels[1], r=2)
-        self.TSconv1 = TransposedConvLayer(dim_in=embed_dim, dim_out=channels[2], r=2)
+        self.TSconv3 = TransposedConvLayer(dim_in=channels[1], dim_out=channels[0], r=r_up[1])
+        self.TSconv2 = TransposedConvLayer(dim_in=channels[2], dim_out=channels[1], r=r_up[2])
+        self.TSconv1 = TransposedConvLayer(dim_in=embed_dim, dim_out=channels[2], r=r_up[3])
 
         block = []
         for _ in range(blocks[0]):
@@ -87,6 +88,7 @@ class SplitClassDecoder(nn.Module):
         blocks=(1, 2, 3, 2),
         heads=(1, 2, 4, 8),
         r=(4, 2, 2, 1),
+        r_up=(4, 2, 2, 2)
     ):
         super(SplitClassDecoder, self).__init__()
         self.out_channels = out_channels
@@ -97,10 +99,10 @@ class SplitClassDecoder(nn.Module):
 
         for _ in range(out_channels):
             self.SegHead_l.append(
-                TransposedConvLayer(dim_in=channels[0], dim_out=1, r=4)
+                TransposedConvLayer(dim_in=channels[0], dim_out=1, r=r_up[0])
             )
             self.TSconv3_l.append(
-                TransposedConvLayer(dim_in=channels[1], dim_out=channels[0], r=2)
+                TransposedConvLayer(dim_in=channels[1], dim_out=channels[0], r=r_up[1])
             )
 
             block = []
@@ -115,8 +117,8 @@ class SplitClassDecoder(nn.Module):
 
         # ----------------------------------------------------------------
 
-        self.TSconv2 = TransposedConvLayer(dim_in=channels[2], dim_out=channels[1], r=2)
-        self.TSconv1 = TransposedConvLayer(dim_in=embed_dim, dim_out=channels[2], r=2)
+        self.TSconv2 = TransposedConvLayer(dim_in=channels[2], dim_out=channels[1], r=r_up[2])
+        self.TSconv1 = TransposedConvLayer(dim_in=embed_dim, dim_out=channels[2], r=r_up[3])
 
         block = []
         for _ in range(blocks[2]):

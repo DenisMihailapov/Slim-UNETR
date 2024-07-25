@@ -16,6 +16,7 @@ class SlimUNETR(nn.Module):
         blocks=(1, 2, 3, 2),
         heads=(1, 2, 4, 4),
         r=(4, 2, 2, 1),
+        r_up=(4, 2, 2, 2),
         dropout=0.3,
         use_split_classes=False,
     ):
@@ -50,6 +51,7 @@ class SlimUNETR(nn.Module):
             blocks=blocks,
             heads=heads,
             r=r,
+            r_up=r_up
         )
         self.dropout = nn.Dropout(dropout)
 
@@ -61,6 +63,7 @@ class SlimUNETR(nn.Module):
                 blocks=blocks,
                 heads=heads,
                 r=r,
+                r_up=r_up
             )
         else:
             self.decoder = Decoder(
@@ -70,6 +73,7 @@ class SlimUNETR(nn.Module):
                 blocks=blocks,
                 heads=heads,
                 r=r,
+                r_up=r_up
             )
         self.leaky_relu = nn.LeakyReLU(negative_slope=0.2)
 

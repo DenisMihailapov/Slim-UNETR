@@ -339,5 +339,6 @@ tbad_dataset:
     blocks: [ 2, 3, 4, 3 ]
     heads: [ 1, 2, 4, 4  ]
     r: [ 4, 2, 2, 1 ]
+    r_up: [ 4, 2, 2, 2 ]
     dropout: 0.3    
     use_split_classes: True
