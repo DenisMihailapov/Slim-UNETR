@@ -119,8 +119,7 @@ class Transforms:
         self._dim_z_resize = None
 
     def _center_crop_fc(self, image):
-        # image  B, C=1, H, W, D
-        image = image[:, 0, ...]
+        # image  B*C, H, W, D
         center = image.shape[2] // 2
         window = self.final_image_size // 2
         crop_range = [
@@ -136,26 +135,25 @@ class Transforms:
                crop_range[0]:crop_range[1],
                crop_range[0]:crop_range[1],
                :
-               ][:, None, ...]
+        ]
 
     def __call__(self, img, randomize=True):
-        img = img[:, 0, ...]
+        orig_shape = img.shape
+        img = img.reshape(
+            *(orig_shape[0] * orig_shape[1], orig_shape[2], orig_shape[2], orig_shape[2])
+        )
         for i in range(len(self._transforms)):
             img = self._transforms[i](img, randomize=randomize)
-        img = img[:, None, ...]
         img = self._center_crop_fc(img)
+        img = img.reshape(*orig_shape)
         return img
 
     def inverse(self, img):
-        img = img[:, 0, ...]
+        orig_shape = img.shape
+        img = img.reshape(
+            *(orig_shape[0] * orig_shape[1], orig_shape[2], orig_shape[2], orig_shape[2])
+        )
         for i in range(len(self._transforms))[::-1]:
             img = self._transforms[i].inverse(img)
-        img = img[:, None, ...]
+        img = img.reshape(*orig_shape)
         return img
-
-    def inverse_predict(self, predict):
-        orig_shape = predict.shape
-        rand_rot_lab = self.inverse(predict.reshape(
-            *(orig_shape[0] * orig_shape[1], orig_shape[2], orig_shape[2], orig_shape[2]))).reshape(*orig_shape)
-
-        return rand_rot_lab
