@@ -138,10 +138,10 @@ class Transforms:
                :
                ][:, None, ...]
 
-    def __call__(self, img):
+    def __call__(self, img, randomize=True):
         img = img[:, 0, ...]
         for i in range(len(self._transforms)):
-            img = self._transforms[i](img)
+            img = self._transforms[i](img, randomize=randomize)
         img = img[:, None, ...]
         img = self._center_crop_fc(img)
         return img
