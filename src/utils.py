@@ -79,21 +79,36 @@ def resume_train_state(
     path: str,
     train_loader: torch.utils.data.DataLoader,
     accelerator: Accelerator,
+    epoch: int = -1,
 ):
     try:
         # Get the most recent checkpoint
         base_path = Path(os.getcwd()) / "model_store"
         base_path /= path
+        print("base_path:", base_path)
 
-        dirs = [base_path / f.name for f in os.scandir(base_path) if f.is_dir()]
+        dirs = [f for f in base_path.glob("*_*") if f.is_dir()]
         dirs.sort(
-            key=os.path.getctime
+            key=lambda f: int(f.name.split("_")[-1])
         )  # Sorts folders by date modified, most recent checkpoint is the last
-        accelerator.print(f"try to load {str(dirs[-1])} train stage")
+
+        if epoch != -1:
+            ind_epoch = 0
+            found = False
+            for f in dirs:
+                if int(f.name.split("_")[-1]) == epoch:
+                    found = True
+                    break
+                ind_epoch += 1
+
+            if found:
+                epoch = ind_epoch
+
+        accelerator.print(f"try to load {str(dirs[epoch])} train stage")
         model = load_pretrain_model(
-            str(dirs[-1] / "pytorch_model.bin"), model, accelerator
+            str(dirs[epoch] / "pytorch_model.bin"), model, accelerator
         )
-        starting_epoch = int(dirs[-1].name.replace("epoch_", "")) + 1
+        starting_epoch = int(dirs[epoch].name.replace("epoch_", "")) + 1
         step = starting_epoch * len(train_loader)
         accelerator.print(
             f"Load state training success ！Start from {starting_epoch} epoch"
