@@ -1,10 +1,11 @@
 import json
 import os
-from typing import Dict, Hashable, Mapping, Tuple
+from typing import Dict, Hashable, Mapping, Optional, Tuple, Callable, Iterable
 
 import monai
 import numpy as np
 import torch
+from torch.utils.data import Dataset
 from easydict import EasyDict
 from monai.utils import ensure_tuple_rep
 
@@ -214,6 +215,62 @@ def get_Brats_transforms(
 
 
 ##
+def get_tbad_lab_unlab_transforms(
+    config: EasyDict,
+) -> Tuple[monai.transforms.Compose, monai.transforms.Compose]:
+    lab_train_transform = monai.transforms.Compose(
+        [
+            monai.transforms.LoadImaged(keys=["image", "label"], image_only=False),
+            monai.transforms.EnsureChannelFirstd(keys="image"),
+            monai.transforms.EnsureTyped(keys=["image", "label"]),
+            # monai._transforms.RandRotated(
+            #     keys=["image", "label"],
+            #     prob=config.trainer.rot_prob,
+            #     range_z=0.0 * np.pi,
+            # ),
+            # monai._transforms.CenterSpatialCropD(
+            #     keys=["image", "label"],
+            #     roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
+            # ),
+            # monai._transforms.NormalizeIntensityd(
+            #     keys="image", nonzero=True, channel_wise=True
+            # ),
+            monai.transforms.ToTensord(keys=["image", "label"]),
+        ]
+    )
+
+    unlab_train_transform = monai.transforms.Compose(
+        [
+            monai.transforms.LoadImaged(keys=["image", "label"], image_only=False),
+            monai.transforms.EnsureChannelFirstd(keys="image"),
+            monai.transforms.EnsureTyped(keys=["image", "label"]),
+            # monai._transforms.CenterSpatialCropD(
+            #     keys=["image", "label"],
+            #     roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
+            # ),
+            # monai._transforms.NormalizeIntensityd(
+            #     keys="image", nonzero=True, channel_wise=True
+            # ),
+            monai.transforms.ToTensord(keys=["image", "label"]),
+        ]
+    )
+
+    val_transform = monai.transforms.Compose(
+        [
+            monai.transforms.LoadImaged(keys=["image", "label"], image_only=False),
+            monai.transforms.EnsureChannelFirstd(keys="image"),
+            monai.transforms.EnsureTyped(keys=["image", "label"]),
+            # monai._transforms.NormalizeIntensityd(
+            #     keys="image", nonzero=True, channel_wise=True
+            # ),
+            # monai._transforms.CenterSpatialCropD(
+            #     keys=["image", "label"],
+            #     roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
+            # ),
+            monai.transforms.ToTensord(keys=["image", "label"]),
+        ]
+    )
+    return lab_train_transform, unlab_train_transform, val_transform
 
 
 def get_Acute_transforms(
@@ -346,40 +403,81 @@ def get_MSD_transforms(
     return train_transform, val_transform
 
 
-def get_dataloader(
-    config: EasyDict, data_flag: str
-) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+class ZipDataLoaders:
+    def __init__(
+        self,
+        dataset: Iterable,
+        transform: Callable | None = None,
+        n_batch_items: int = 2,
+        num_workers: int = 0,
+        batch_size: int = 8,
+        shuffle: bool = True,
+    ):
+
+        self.n_samples = len(dataset) // batch_size
+        self.n_batch_items = n_batch_items
+        if self.n_batch_items <= 0:
+            raise ValueError("datasets should not be an empty")
+
+        if shuffle:
+            np.random.shuffle(dataset)
+
+        self.transform = transform
+        self.dataloaders = [
+            monai.data.DataLoader(
+                monai.data.Dataset(
+                    data=dataset,
+                    transform=transform,
+                ),
+                num_workers=num_workers,
+                batch_size=batch_size,
+                shuffle=False,
+            )
+            for _ in range(n_batch_items)
+        ]
+
+        self.image_size = self.dataloaders[0].dataset[0]["image"].shape[-1]
+
+    def __iter__(self) -> Iterable:
+        return zip(*self.dataloaders)
+
+    def __len__(self) -> int:
+        return self.n_samples
+
+
+def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple[
+    torch.utils.data.DataLoader,
+    torch.utils.data.DataLoader,
+    Optional[torch.utils.data.DataLoader],
+]:
     if data_flag in ["hepatic_vessel2021", "heart"]:
-        train_images = load_dataset_images(config.data_root)
+        dataset_images = load_dataset_images(config.data_root)
         train_transform, val_transform = get_MSD_transforms(config)
     else:
         if data_flag in ["brain2019", "brain2019_small"]:
-            train_images = load_brats2019_dataset_images(config.data_root)
+            dataset_images = load_brats2019_dataset_images(config.data_root)
             config.trainer.is_brats2019 = True
             train_transform, val_transform = get_Brats_transforms(config)
-        elif data_flag in ["acute", "lung", "lung_big_model", "tbad_dataset"]:
-            train_images = load_dataset_images(config.data_root)
+        elif data_flag in ["acute", "lung", "lung_big_model"]:
+            dataset_images = load_dataset_images(config.data_root)
             train_transform, val_transform = get_Acute_transforms(config)
+        elif data_flag in ["tbad_dataset"]:
+            dataset_images = load_dataset_images(config.data_root)
+            train_transform, unlab_train_transform, val_transform = (
+                get_tbad_lab_unlab_transforms(config)
+            )
         else:
-            train_images = load_brats2021_dataset_images(config.data_root)
+            dataset_images = load_brats2021_dataset_images(config.data_root)
             config.trainer.is_brats2019 = False
             train_transform, val_transform = get_Brats_transforms(config)
 
-    train_lentgh = int(len(train_images) * config.trainer.train_ratio)
-    train_dataset = monai.data.Dataset(
-        data=train_images[:train_lentgh],
-        transform=train_transform,
-    )
-    val_dataset = monai.data.Dataset(
-        data=train_images[train_lentgh:],
-        transform=val_transform,
-    )
+    dataset_images = np.array(dataset_images)
 
-    train_loader = monai.data.DataLoader(
-        train_dataset,
-        num_workers=config.trainer.num_workers,
-        batch_size=config.trainer.batch_size,
-        shuffle=True,
+    train_lentgh = int(len(dataset_images) * config.trainer.train_ratio)
+
+    val_dataset = monai.data.Dataset(
+        data=dataset_images[train_lentgh:],
+        transform=val_transform,
     )
 
     if data_flag == "hepatic_vessel2021":
@@ -394,4 +492,37 @@ def get_dataloader(
         shuffle=False,
     )
 
-    return train_loader, val_loader
+    train_indexes = np.array(range(train_lentgh))
+    np.random.shuffle(train_indexes)
+
+    unlab_loader = None
+    unlabled_ratio = config.trainer.unlabled_ratio
+    assert 0.0 <= unlabled_ratio < 1.0, f"unlabled ratio {unlabled_ratio} is not valid"
+    if unlabled_ratio > 0.0:
+
+        unlabled_lentgh = int(train_lentgh * unlabled_ratio)
+        train_lentgh -= unlabled_lentgh
+        train_indexes = train_indexes[unlabled_lentgh:]
+        if needs_unlab:
+            unlab_loader = ZipDataLoaders(
+                dataset=dataset_images[train_indexes[:unlabled_lentgh]],
+                transform=unlab_train_transform,
+                n_batch_items=1,
+                num_workers=config.trainer.num_workers,
+                batch_size=config.trainer.batch_size,
+                shuffle=True,
+            )
+
+    train_dataset = monai.data.Dataset(
+        data=dataset_images[train_indexes],
+        transform=train_transform,
+    )
+
+    train_loader = monai.data.DataLoader(
+        train_dataset,
+        num_workers=config.trainer.num_workers,
+        batch_size=config.trainer.batch_size,
+        shuffle=True,
+    )
+
+    return train_loader, val_loader, unlab_loader
