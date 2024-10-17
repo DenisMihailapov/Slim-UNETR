@@ -1,4 +1,5 @@
 from typing import Any
+from torch import Tensor
 from monai.data import MetaTensor, get_track_meta
 from monai.utils import convert_to_tensor
 
@@ -15,20 +16,23 @@ class RandFlip(RandomizableTransform, InvertibleTrait):
         RandomizableTransform.__init__(self, prob)
         self._transform = Flip(spatial_axis=spatial_axis, lazy=False)
 
-    def __call__(self, img: MetaTensor, randomize: bool = True) -> MetaTensor:
+    def __call__(self, img: Tensor, randomize: bool = True) -> Tensor:
         if randomize:
             self.randomize(None)
 
         if self._do_transform:
-            img = self._transform(img.as_tensor())
+            img = img.as_tensor() if isinstance(img, MetaTensor) else img
+            img = self._transform(img)
             img = convert_to_tensor(img, track_meta=get_track_meta())
 
         return img
 
-    def inverse(self, img: MetaTensor) -> MetaTensor:
+    def inverse(self, img: Tensor) -> Tensor:
         if not self._do_transform:
             return img
-        img = self._transform(img.as_tensor())
+
+        img = img.as_tensor() if isinstance(img, MetaTensor) else img
+        img = self._transform(img)
         img = convert_to_tensor(img, track_meta=get_track_meta())
         return img
 
@@ -69,21 +73,24 @@ class RandRotate(RandomizableTransform, InvertibleTrait):
         self.z = self.R.uniform(low=self.range_z[0], high=self.range_z[1])
         self._transform.angle = (self.x, self.y, self.z)
 
-    def __call__(self, img: MetaTensor, randomize: bool = True) -> MetaTensor:
+    def __call__(self, img: Tensor, randomize: bool = True) -> Tensor:
         if randomize:
             self.randomize(None)
 
         if self._do_transform:
-            img = self._transform(img.as_tensor())
+            img = img.as_tensor() if isinstance(img, MetaTensor) else img
+            img = self._transform(img)
             img = convert_to_tensor(img, track_meta=get_track_meta())
 
         return img
 
-    def inverse(self, img: MetaTensor) -> MetaTensor:
+    def inverse(self, img: Tensor) -> Tensor:
         if not self._do_transform:
             return img
         self._transform.angle = (-self.x, -self.y, -self.z)
-        img = self._transform(img.as_tensor())
+
+        img = img.as_tensor() if isinstance(img, MetaTensor) else img
+        img = self._transform(img)
         self._transform.angle = (self.x, self.y, self.z)
         img = convert_to_tensor(img, track_meta=get_track_meta())
         return img
@@ -129,7 +136,8 @@ class Transforms:
         self._dim_z_resize = array.Resize(
             spatial_size=(image.shape[2], image.shape[2], self.final_image_size)
         )
-        image = self._dim_z_resize(image)
+        image = self._dim_z_resize(image.as_tensor())
+        image = convert_to_tensor(image)
         return image[
                :,
                crop_range[0]:crop_range[1],
