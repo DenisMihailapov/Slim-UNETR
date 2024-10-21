@@ -81,9 +81,6 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
     return metrics_dict, batch_acc
 
 
-def regularization_loss(hidden_states_out):
-    pass
-
 
 def train_one_epoch(
     model: torch.nn.Module,
@@ -106,6 +103,8 @@ def train_one_epoch(
         # print(logits.shape)
         # print(image_batch["label"].shape)
         total_loss, _ = calc_total_loss(logits, image_batch["label"], loss_functions)
+
+
 
         accelerator.log(values={"Train/Total Loss": float(total_loss)}, step=step)
         accelerator.print(
@@ -206,6 +205,15 @@ def get_experiment_dir(config, data_flag, root="logs"):
     logging_dir.mkdir(parents=True, exist_ok=True)
     return logging_dir
 
+def get_device(config):
+    device = config.device.lower()
+    if device == "cpu":
+        return torch.device("cpu")
+    elif device.startswith("gpu") or device.startswith("cuda"):
+        return torch.device(f"cuda:{config.device[-1]}")
+    else:
+        raise ValueError("Unknown device")
+
 
 if __name__ == "__main__":
 
@@ -217,6 +225,7 @@ if __name__ == "__main__":
     same_seeds(config.trainer.seed)
     logging_dir = get_experiment_dir(config, data_flag, root="log")
 
+    torch.cuda.set_device(get_device(config))
     accelerator = Accelerator(
         cpu=False, log_with=["tensorboard"], project_dir=str(logging_dir)
     )
