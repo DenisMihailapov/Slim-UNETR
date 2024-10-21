@@ -1,37 +1,38 @@
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Dict, Tuple
-from easydict import EasyDict
 
-from objprint import objstr
-
-import torch
-from torch import nn
 import monai
-from monai.utils import ensure_tuple_rep
+import torch
 from accelerate import Accelerator
+from easydict import EasyDict
+from monai.utils import ensure_tuple_rep
+from objprint import objstr
 from timm.optim import optim_factory
+from torch import nn
+from tqdm import tqdm
 
 from src import utils
+from src.SlimUNETR.SlimUNETR import SlimUNETR
 from src.loader import get_dataloader
 from src.optimizer import LinearWarmupCosineAnnealingLR
-from src.SlimUNETR.SlimUNETR import SlimUNETR
+from src.unlab.transforms import Transforms
 from src.utils import Logger, load_config, same_seeds
 
 
-def calc_total_loss(logits, label, loss_functions):
+def calc_total_loss(logits, label, loss_functions, accelerator, step, train=True):
     log = ""
     total_loss = 0
+    name_stage = "Train" if train else "Val"
     for name in loss_functions:
         loss_fn, ratio = loss_functions[name]
         loss = ratio * loss_fn(logits, label)
-        accelerator.log({"Train/" + name: float(loss)}, step=step)
+        accelerator.log({f"{name_stage}/" + name: float(loss)}, step=step)
         log += f" {name} {float(loss):1.5f} "
         total_loss += loss
 
     return total_loss, log
-
 
 def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
     metrics_dict = {}
@@ -84,7 +85,6 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
 
 def train_one_epoch(
     model: torch.nn.Module,
-    config: EasyDict,
     data_flag: str,
     loss_functions: Dict[str, Tuple[torch.nn.modules.loss._Loss, float]],
     train_loader: torch.utils.data.DataLoader,
@@ -94,23 +94,42 @@ def train_one_epoch(
     post_trans: monai.transforms.Compose,
     accelerator: Accelerator,
     epoch: int,
+    num_epochs: int,
     step: int,
+    transforms: Transforms = None,
+    use_transform: bool = False,
 ):
+    device = next(model.parameters()).device
     # train
     model.train()
     for i, image_batch in enumerate(train_loader):
-        logits = model(image_batch["image"])
-        # print(logits.shape)
-        # print(image_batch["label"].shape)
-        total_loss, _ = calc_total_loss(logits, image_batch["label"], loss_functions)
+        image = image_batch["image"].to(device)
+        label = image_batch["label"].to(device)
+
+        logits = model(image)
+        total_loss, _ = calc_total_loss(logits, label, loss_functions, accelerator, step)
+
+        dict_values = {"Train/Total Loss": float(total_loss)}
+        log = f"Epoch [{epoch + 1}/{num_epochs}] Training [{i + 1}/{len(train_loader)}] Loss: {total_loss:1.5f}"
+
+        if use_transform:
+            image_tf = transforms(image)
+            logits_tf = model(image_tf)
+            label_tf = transforms(label, randomize=False)
+
+            tf_loss, _ = calc_total_loss(
+                logits_tf, label_tf, loss_functions, accelerator, step
+            )
+            tf_loss *= 0.7
+            dict_values.update(
+                {"Train/TrFm Loss": float(tf_loss)}
+            )
+            log += f" TrFm Loss: {tf_loss:1.5f}"
+            total_loss += tf_loss
 
 
-
-        accelerator.log(values={"Train/Total Loss": float(total_loss)}, step=step)
-        accelerator.print(
-            f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training [{i + 1}/{len(train_loader)}] Loss: {total_loss:1.5f}",
-            flush=True,
-        )
+        accelerator.log(values=dict_values, step=step)
+        accelerator.print(log, flush=True)
         step += 1
 
         accelerator.backward(total_loss)
@@ -124,7 +143,7 @@ def train_one_epoch(
     scheduler.step(epoch)
     metric, _ = calc_metrics_dict(metrics, accelerator, data_flag, is_train=True)
     accelerator.print(
-        f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training metric {metric}"
+        f"Epoch [{epoch + 1}/{num_epochs}] Training metric {metric}"
     )
     accelerator.log(metric, step=epoch)
     return step
@@ -197,6 +216,8 @@ def get_experiment_dir(config, data_flag, root="logs"):
     logging_dir /= f"seed{config.trainer.seed}"
 
     logging_dir /= f"epoch{config.trainer.num_epochs}"
+
+    logging_dir /= f"use_tf{config.trainer.use_transform}"
 
     logging_dir /= f"ims_{config.trainer.image_size}"
 
@@ -310,6 +331,13 @@ if __name__ == "__main__":
         model, optimizer, scheduler, train_loader, val_loader
     )
 
+    transforms = Transforms(
+        rot_prob=config.trainer.rot_prob,
+        flip_prob=config.trainer.flip_prob,
+        rot_range_z=config.trainer.rot_angle,
+        final_image_size=config.trainer.image_size
+    )
+
     def _weights_init(m):
 
         classname = m.__class__.__name__
@@ -334,11 +362,11 @@ if __name__ == "__main__":
 
     # Start Training
     accelerator.print("Start Training!")  # type: ignore
-    for epoch in range(starting_epoch, config.trainer.num_epochs):
+    iterator = tqdm(range(starting_epoch, config.trainer.num_epochs), ncols=70)
+    for epoch in iterator:
         # train
         step = train_one_epoch(
             model,
-            config,
             data_flag,
             loss_functions,
             train_loader,
@@ -348,7 +376,10 @@ if __name__ == "__main__":
             post_trans,
             accelerator,
             epoch,
+            config.trainer.num_epochs,
             step,
+            transforms,
+            config.trainer.use_transform
         )
 
         # val
@@ -367,7 +398,8 @@ if __name__ == "__main__":
         )
 
         accelerator.print(
-            f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] lr = {scheduler.get_last_lr()} best acc: {best_acc}, mean acc: {mean_acc}, mean class: {batch_acc}"
+            f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] lr = {scheduler.get_last_lr()} "
+            f"best acc: {best_acc}, mean acc: {mean_acc}, mean class: {batch_acc}"
         )
 
         # save model
@@ -377,7 +409,7 @@ if __name__ == "__main__":
             best_class = batch_acc
             best_eopch = epoch
 
-        if epoch % 10 == 0:
+        if epoch % 25 == 0:
             accelerator.save_state(output_dir=f"{base_exp_path}/epoch_{epoch}")
 
     accelerator.print(f"best dice mean acc: {best_acc}")
