@@ -64,9 +64,9 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
         elif data_flag == "tbad_dataset":
             metrics_dict.update(
                 {
-                    f"{mode}/TL {metric_name}": float(batch_acc[0]),
-                    f"{mode}/FL {metric_name}": float(batch_acc[1]),
-                    f"{mode}/FLT {metric_name}": float(batch_acc[2]),
+                    f"{mode}/all {metric_name}": float(batch_acc[0]),
+                    f"{mode}/TL {metric_name}": float(batch_acc[1]),
+                    f"{mode}/FL {metric_name}": float(batch_acc[2]),
                 }
             )
         else:
@@ -190,16 +190,18 @@ def val_one_epoch(
     )
 
 
-def get_logging_dir(config, data_flag):
-    logging_dir = Path(os.getcwd()) / "logs"
+def get_experiment_dir(config, data_flag, root="logs"):
+    logging_dir = Path.cwd() / root
 
-    logging_dir /= data_flag
+    logging_dir /= f"{data_flag}_orig"
 
     logging_dir /= f"seed{config.trainer.seed}"
 
     logging_dir /= f"epoch{config.trainer.num_epochs}"
 
-    logging_dir /= f"ims_{config.trainer.image_size}_rot_prob{config.trainer.rot_prob}_lrelu_split_class_sigmoid_GDFL_g{gamma}"
+    logging_dir /= f"ims_{config.trainer.image_size}"
+
+    logging_dir /= f"lrelu_split_new_class_GDFL_g{config.trainer.gamma}_fr08_fw080915"
 
     logging_dir.mkdir(parents=True, exist_ok=True)
     return logging_dir
@@ -213,7 +215,7 @@ if __name__ == "__main__":
     )
 
     same_seeds(config.trainer.seed)
-    logging_dir = get_logging_dir(config, data_flag)
+    logging_dir = get_experiment_dir(config, data_flag, root="log")
 
     accelerator = Accelerator(
         cpu=False, log_with=["tensorboard"], project_dir=str(logging_dir)
@@ -226,7 +228,9 @@ if __name__ == "__main__":
     model = SlimUNETR(**config.slim_unetr)
 
     accelerator.print("Load Dataloader...")
-    train_loader, val_loader = get_dataloader(config, data_flag)
+    train_loader, val_loader, _ = get_dataloader(
+        config, data_flag, needs_unlab=not config.trainer.only_labeled
+    )
 
     inference = monai.inferers.SlidingWindowInferer(
         roi_size=ensure_tuple_rep(config.trainer.image_size, dim=3),
@@ -311,9 +315,7 @@ if __name__ == "__main__":
 
     model.apply(_weights_init)
 
-    base_exp_path = f"{os.getcwd()}/model_store/{config.finetune.checkpoint}/seed{config.trainer.seed}/epoch{config.trainer.num_epochs}/"
-
-    base_exp_path += f"ims_{config.trainer.image_size}_rot_prob{config.trainer.rot_prob}_lrelu_split_class_sigmoid_GD_FL_g{gamma}"
+    base_exp_path = get_experiment_dir(config, data_flag, root="model_store")
 
     # resume training
     if config.trainer.resume:

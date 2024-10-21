@@ -1,2 +1,6 @@
 .DS_Store
 *.pth
+logs
+comp_logs
+config.yml
+config-.yml

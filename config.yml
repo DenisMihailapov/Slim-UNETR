@@ -301,13 +301,14 @@ lung_big_model:
 
 
 tbad_dataset:
-  data_root: ../med_data/common/imageTBAD_MSD_rs
+  data_root: ../med_data/common/imageTBAD_MSD_preproc_128_border_crop64
+  device: cuda1
   trainer:
-    seed: 50
-    num_epochs: 1000
+    seed: 32
+    num_epochs: 800
     warmup: 60
     train_ratio: 0.8
-    batch_size: 8
+    batch_size: 6
     lr: 0.002
     min_lr: 0.00005
     optimizer: adamw
@@ -316,12 +317,20 @@ tbad_dataset:
     momentum_teacher: 0.996
     pred_ratio_var: 0
     num_workers: 0
-    rot_prob: 0.8
+    rot_prob: 0.7
+    rot_angle: 0.62830 # 2*pi/10
+    flip_prob: 0.3
 
     dice_loss_ratio: 1.
-    focal_class_weights: [0.7, 0.7, 2.0]
-    focal_loss_ratio: 0.6
+    focal_class_weights: [0.8, 0.9, 1.5]
+    focal_loss_ratio: 0.8
     gamma: 2.0
+
+    start_unlab_epoch: 200
+    unlabled_ratio: 0.0
+    unlab_weight: 0.3
+    only_labeled: False
+    use_transform: True
     
     image_size: 128
     resume: True
