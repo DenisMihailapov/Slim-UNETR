@@ -1,3 +1,5 @@
+import copy
+
 import torch
 from torch import nn
 
@@ -8,12 +10,17 @@ class ModelEmaV2(nn.Module):
     def __init__(self, model, decay=0.96, device=None):
         super(ModelEmaV2, self).__init__()
         # make a copy of the model for accumulating moving average of weights
-        self.module = model
-        self.module.eval()
+        self.module = copy.deepcopy(model)
         self.decay = decay
         self.device = device  # perform ema on different device from model if set
         if self.device is not None:
             self.module.to(device=device)
+
+    def eval(self):
+        self.module.eval()
+
+    def forward(self, x):
+        return self.module(x)
 
     def _update(self, model, update_fn):
         with torch.no_grad():
