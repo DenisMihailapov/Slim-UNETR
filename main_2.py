@@ -13,6 +13,7 @@ from timm.optim import optim_factory
 from torch import nn
 from tqdm import tqdm
 
+from lab_unlab_trainer import ModelEmaV2
 from src import utils
 from src.SlimUNETR.SlimUNETR import SlimUNETR
 from src.loader import get_dataloader
@@ -106,19 +107,24 @@ def train_one_epoch(
         image = image_batch["image"].to(device)
         label = image_batch["label"].to(device)
 
-        logits = model(image)
-        total_loss, _ = calc_total_loss(logits, label, loss_functions, accelerator, step)
+        image_tf_1 = transforms(image)
+        logits_tf_1 = model(image_tf_1)
+        label_tf_1 = transforms(label, randomize=False)
+
+        total_loss, _ = calc_total_loss(
+            logits_tf_1, label_tf_1, loss_functions, accelerator, step
+        )
 
         dict_values = {"Train/Total Loss": float(total_loss)}
         log = f"Epoch [{epoch + 1}/{num_epochs}] Training [{i + 1}/{len(train_loader)}] Loss: {total_loss:1.5f}"
 
         if use_transform:
-            image_tf = transforms(image)
-            logits_tf = model(image_tf)
-            label_tf = transforms(label, randomize=False)
+            image_tf_2 = transforms(image)
+            logits_tf_2 = model(image_tf_2)
+            label_tf_2 = transforms(label, randomize=False)
 
             tf_loss, _ = calc_total_loss(
-                logits_tf, label_tf, loss_functions, accelerator, step
+                logits_tf_2, label_tf_2, loss_functions, accelerator, step
             )
             tf_loss *= 0.7
             dict_values.update(
@@ -136,9 +142,9 @@ def train_one_epoch(
         optimizer.step()
         optimizer.zero_grad()
 
-        val_outputs = [post_trans(i) for i in logits]
+        val_outputs = [post_trans(i) for i in logits_tf_1]
         for metric_name in metrics:
-            metrics[metric_name](y_pred=val_outputs, y=image_batch["label"])
+            metrics[metric_name](y_pred=val_outputs, y=label_tf_1)
 
     scheduler.step(epoch)
     metric, _ = calc_metrics_dict(metrics, accelerator, data_flag, is_train=True)
@@ -148,6 +154,80 @@ def train_one_epoch(
     accelerator.log(metric, step=epoch)
     return step
 
+
+def train_unlabeled_one_epoch(
+    model: torch.nn.Module,
+    ema_model: ModelEmaV2,
+    data_flag: str,
+    loss_functions: Dict[str, Tuple[torch.nn.modules.loss._Loss, float]],
+    unlab_loader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler._LRScheduler,
+    metrics: Dict[str, monai.metrics.CumulativeIterationMetric],
+    post_trans: monai.transforms.Compose,
+    accelerator: Accelerator,
+    epoch: int,
+    num_epochs: int,
+    step: int,
+    transforms: Transforms = None,
+    unlab_weight: float = 0.3
+):
+    device = next(model.parameters()).device
+    # train
+    model.train()
+    for i, image_batch in enumerate(unlab_loader):
+        image = image_batch["image"].to(device)
+        label = image_batch["label"].to(device)
+
+        image_tf_1 = transforms(image)
+        logits_tf_1 = model(image_tf_1)
+        label_tf_1 = transforms(label, randomize=False)
+
+        total_loss, _ = calc_total_loss(
+            logits_tf_1, label_tf_1, loss_functions, accelerator, step
+        )
+
+        dict_values = {"Train/Total Loss": float(total_loss)}
+        log = f"Epoch [{epoch + 1}/{num_epochs}] Training [{i + 1}/{len(train_loader)}] Loss: {total_loss:1.5f}"
+
+
+        image_tf_2 = transforms(image)
+        logits_tf_2 = model(image_tf_2)
+        with torch.no_grad():
+            pseudo_label = ema_model(image_tf_2)
+
+        unlab_loss, _ = calc_total_loss(
+            logits_tf_2, pseudo_label, loss_functions, accelerator, step
+        )
+        unlab_loss *= unlab_weight
+        dict_values.update(
+            {"Train/Unlab Loss": float(unlab_loss)}
+        )
+        log += f" Unlab Loss: {unlab_loss:1.5f}"
+        total_loss += unlab_loss
+
+        accelerator.log(values=dict_values, step=step)
+        accelerator.print(log, flush=True)
+        step += 1
+
+        accelerator.backward(total_loss)
+        optimizer.step()
+        optimizer.zero_grad()
+
+        ema_model.update(model)
+        ema_model.eval()
+
+        val_outputs = [post_trans(i) for i in logits_tf_1]
+        for metric_name in metrics:
+            metrics[metric_name](y_pred=val_outputs, y=label_tf_1)
+
+    scheduler.step(epoch)
+    metric, _ = calc_metrics_dict(metrics, accelerator, data_flag, is_train=True)
+    accelerator.print(
+        f"Epoch [{epoch + 1}/{num_epochs}] Training metric {metric}"
+    )
+    accelerator.log(metric, step=epoch)
+    return step
 
 @torch.no_grad()
 def val_one_epoch(
@@ -221,6 +301,15 @@ def get_experiment_dir(config, data_flag, root="logs"):
 
     logging_dir /= f"ims_{config.trainer.image_size}"
 
+    base_unlab_path = "only_labeled_" if config.trainer.only_labeled else ""
+    base_unlab_path += (
+        f"unlab_ratio{config.trainer.unlabled_ratio}_unlab_weight{config.trainer.unlab_weight}_start_unlab_epoch{config.trainer.start_unlab_epoch}"
+        if config.trainer.unlabled_ratio > 0.0
+        else ""
+    )
+
+    logging_dir /= base_unlab_path
+
     logging_dir /= f"lrelu_split_new_class_GDFL_g{config.trainer.gamma}_fr08_fw080915"
 
     logging_dir.mkdir(parents=True, exist_ok=True)
@@ -258,7 +347,7 @@ if __name__ == "__main__":
     model = SlimUNETR(**config.slim_unetr)
 
     accelerator.print("Load Dataloader...")
-    train_loader, val_loader, _ = get_dataloader(
+    train_loader, val_loader, unlab_loader = get_dataloader(
         config, data_flag, needs_unlab=not config.trainer.only_labeled
     )
 
@@ -327,8 +416,8 @@ if __name__ == "__main__":
     best_acc = 0
     best_class = []
 
-    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(
-        model, optimizer, scheduler, train_loader, val_loader
+    model, optimizer, scheduler, train_loader, val_loader, unlab_loader = accelerator.prepare(
+        model, optimizer, scheduler, train_loader, val_loader, unlab_loader
     )
 
     transforms = Transforms(
@@ -351,6 +440,8 @@ if __name__ == "__main__":
             nn.init.zeros_(m.bias)
 
     model.apply(_weights_init)
+
+    ema_model = ModelEmaV2(model)
 
     base_exp_path = get_experiment_dir(config, data_flag, root="model_store")
 
@@ -381,6 +472,30 @@ if __name__ == "__main__":
             transforms,
             config.trainer.use_transform
         )
+
+        if config.trainer.unlabled_ratio > 0.0:
+            if (
+                epoch > config.trainer.start_unlab_epoch
+                and not config.trainer.only_labeled
+            ):
+
+                train_unlabeled_one_epoch(
+                    model,
+                    ema_model,
+                    data_flag,
+                    loss_functions,
+                    unlab_loader,
+                    optimizer,
+                    scheduler,
+                    metrics,
+                    post_trans,
+                    accelerator,
+                    epoch,
+                    config.trainer.num_epochs,
+                    step,
+                    transforms,
+                    config.trainer.unlab_weight
+                )
 
         # val
         mean_acc, batch_acc, val_step = val_one_epoch(
