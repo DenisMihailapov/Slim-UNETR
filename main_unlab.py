@@ -1,27 +1,24 @@
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Dict, Tuple
-from easydict import EasyDict
 
+import monai
+import torch
+from accelerate import Accelerator
+from easydict import EasyDict
+from monai.utils import ensure_tuple_rep
+from objprint import objstr
+from timm.optim import optim_factory
+from torch import nn
 from tqdm import tqdm
 
-from objprint import objstr
-
-import torch
-from torch import nn
-import monai
-from monai.utils import ensure_tuple_rep
-from accelerate import Accelerator
-from timm.optim import optim_factory
-
 from src import utils
+from src.SlimUNETR.SlimUNETR import SlimUNETR
 from src.loader import get_dataloader
 from src.optimizer import LinearWarmupCosineAnnealingLR
-from src.SlimUNETR.SlimUNETR import SlimUNETR
-from src.unlab.transforms import Transforms
+from src.unlab.lab_unlab_trainer import Trainer
 from src.utils import Logger, load_config, same_seeds
-from lab_unlab_trainer import Trainer
 
 
 def calc_total_loss(logits, label, loss_functions, accelerator, step, train=True):

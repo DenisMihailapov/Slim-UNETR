@@ -13,11 +13,11 @@ from timm.optim import optim_factory
 from torch import nn
 from tqdm import tqdm
 
-from lab_unlab_trainer import ModelEmaV2
 from src import utils
 from src.SlimUNETR.SlimUNETR import SlimUNETR
 from src.loader import get_dataloader
 from src.optimizer import LinearWarmupCosineAnnealingLR
+from src.unlab.lab_unlab_trainer import ModelEmaV2
 from src.unlab.transforms import Transforms
 from src.utils import Logger, load_config, same_seeds
 
