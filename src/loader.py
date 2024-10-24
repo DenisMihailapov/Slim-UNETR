@@ -504,10 +504,12 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
         train_lentgh -= unlabled_lentgh
         train_indexes = train_indexes[unlabled_lentgh:]
         if needs_unlab:
-            unlab_loader = ZipDataLoaders(
-                dataset=dataset_images[train_indexes[:unlabled_lentgh]],
+            unlab_dataset = monai.data.Dataset(
+                data=dataset_images[train_indexes[:unlabled_lentgh]],
                 transform=unlab_train_transform,
-                n_batch_items=1,
+            )
+            unlab_loader = monai.data.DataLoader(
+                unlab_dataset,
                 num_workers=config.trainer.num_workers,
                 batch_size=config.trainer.batch_size,
                 shuffle=True,
