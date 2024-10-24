@@ -308,7 +308,7 @@ tbad_dataset:
     num_epochs: 800
     warmup: 60
     train_ratio: 0.8
-    batch_size: 6
+    batch_size: 4
     lr: 0.002
     min_lr: 0.00005
     optimizer: adamw
@@ -326,11 +326,11 @@ tbad_dataset:
     focal_loss_ratio: 0.8
     gamma: 2.0
 
-    start_unlab_epoch: 200
-    unlabled_ratio: 0.0
+    start_unlab_epoch: 30
+    unlabled_ratio: 0.5
     unlab_weight: 0.3
     only_labeled: False
-    use_transform: True
+    use_transform: False
     
     image_size: 128
     resume: True
