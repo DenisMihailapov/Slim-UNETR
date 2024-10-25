@@ -473,10 +473,10 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
 
     dataset_images = np.array(dataset_images)
 
-    train_lentgh = int(len(dataset_images) * config.trainer.train_ratio)
+    train_length = int(len(dataset_images) * config.trainer.train_ratio)
 
     val_dataset = monai.data.Dataset(
-        data=dataset_images[train_lentgh:],
+        data=dataset_images[train_length:],
         transform=val_transform,
     )
 
@@ -492,7 +492,7 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
         shuffle=False,
     )
 
-    train_indexes = np.array(range(train_lentgh))
+    train_indexes = np.array(range(train_length))
     np.random.shuffle(train_indexes)
 
     unlab_loader = None
@@ -500,12 +500,12 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
     assert 0.0 <= unlabled_ratio < 1.0, f"unlabled ratio {unlabled_ratio} is not valid"
     if unlabled_ratio > 0.0:
 
-        unlabled_lentgh = int(train_lentgh * unlabled_ratio)
-        train_lentgh -= unlabled_lentgh
-        train_indexes = train_indexes[unlabled_lentgh:]
+        unlabeled_length = int(train_length * unlabled_ratio)
+        train_length -= unlabeled_length
+        train_indexes = train_indexes[unlabeled_length:]
         if needs_unlab:
             unlab_dataset = monai.data.Dataset(
-                data=dataset_images[train_indexes[:unlabled_lentgh]],
+                data=dataset_images[train_indexes[:unlabeled_length]],
                 transform=unlab_train_transform,
             )
             unlab_loader = monai.data.DataLoader(
