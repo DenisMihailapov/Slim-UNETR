@@ -16,24 +16,12 @@ from tqdm import tqdm
 from src import utils
 from src.SlimUNETR.SlimUNETR import SlimUNETR
 from src.loader import get_dataloader
+from src.loss import get_loss_functions
 from src.optimizer import LinearWarmupCosineAnnealingLR
-from src.unlab.lab_unlab_trainer import ModelEmaV2
+from src.unlab.lab_unlab_trainer import ModelEmaV2, calc_total_loss
 from src.unlab.transforms import Transforms
-from src.utils import Logger, load_config, same_seeds
+from src.utils import Logger, load_config, same_seeds, get_experiment_dir, get_device
 
-
-def calc_total_loss(logits, label, loss_functions, accelerator, step, train=True):
-    log = ""
-    total_loss = 0
-    name_stage = "Train" if train else "Val"
-    for name in loss_functions:
-        loss_fn, ratio = loss_functions[name]
-        loss = ratio * loss_fn(logits, label)
-        accelerator.log({f"{name_stage}/" + name: float(loss)}, step=step)
-        log += f" {name} {float(loss):1.5f} "
-        total_loss += loss
-
-    return total_loss, log
 
 def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
     metrics_dict = {}
@@ -288,43 +276,6 @@ def val_one_epoch(
     )
 
 
-def get_experiment_dir(config, data_flag, root="logs"):
-    logging_dir = Path.cwd() / root
-
-    logging_dir /= f"{data_flag}_orig"
-
-    logging_dir /= f"seed{config.trainer.seed}"
-
-    logging_dir /= f"epoch{config.trainer.num_epochs}"
-
-    logging_dir /= f"use_tf{config.trainer.use_transform}"
-
-    logging_dir /= f"ims_{config.trainer.image_size}"
-
-    base_unlab_path = "only_labeled_" if config.trainer.only_labeled else ""
-    base_unlab_path += (
-        f"unlab_ratio{config.trainer.unlabled_ratio}_unlab_weight{config.trainer.unlab_weight}_start_unlab_epoch{config.trainer.start_unlab_epoch}"
-        if config.trainer.unlabled_ratio > 0.0
-        else ""
-    )
-
-    logging_dir /= base_unlab_path
-
-    logging_dir /= f"lrelu_split_new_class_GDFL_g{config.trainer.gamma}_fr08_fw080915"
-
-    logging_dir.mkdir(parents=True, exist_ok=True)
-    return logging_dir
-
-def get_device(config):
-    device = config.device.lower()
-    if device == "cpu":
-        return torch.device("cpu")
-    elif device.startswith("gpu") or device.startswith("cuda"):
-        return torch.device(f"cuda:{config.device[-1]}")
-    else:
-        raise ValueError("Unknown device")
-
-
 if __name__ == "__main__":
 
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -385,29 +336,7 @@ if __name__ == "__main__":
         max_epochs=config.trainer.num_epochs,
         eta_min=config.trainer.min_lr,
     )
-
-    loss_functions = {
-        "focal_loss": (
-            monai.losses.FocalLoss(  # sigmoid_focal_loss FL(pt) = -alpha * (1 - pt)**gamma * log(pt)
-                to_onehot_y=False,
-                weight=config.trainer.focal_class_weights,
-                gamma=config.trainer.gamma,
-            ),
-            config.trainer.focal_loss_ratio,
-        ),
-        "gen_dice_loss": (
-            monai.losses.GeneralizedDiceLoss(
-                to_onehot_y=False,
-                sigmoid=True,
-                smooth_nr=1e-5,
-                smooth_dr=1e-5,
-            ),
-            config.trainer.dice_loss_ratio,
-        ),
-        # "tversky_loss": monai.losses.TverskyLoss(
-        #     to_onehot_y=False, sigmoid=True, alpha=0.8, beta=0.5
-        # ),
-    }
+    loss_functions = get_loss_functions(config.trainer)
 
     step = 0
     best_eopch = -1

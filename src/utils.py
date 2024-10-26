@@ -60,6 +60,44 @@ def load_config(config_filename="config.yml", mode="r"):
     return config, data_flag, is_HepaticVessel
 
 
+def get_experiment_dir(config, data_flag, root="logs"):
+    logging_dir = Path.cwd() / root
+
+    logging_dir /= f"{data_flag}_orig"
+
+    logging_dir /= f"seed{config.trainer.seed}"
+
+    logging_dir /= f"epoch{config.trainer.num_epochs}"
+
+    logging_dir /= f"use_tf{config.trainer.use_transform}"
+
+    logging_dir /= f"ims_{config.trainer.image_size}"
+
+    base_unlab_path = "only_labeled_" if config.trainer.only_labeled else ""
+    base_unlab_path += (
+        f"unlab_ratio{config.trainer.unlabled_ratio}_unlab_weight{config.trainer.unlab_weight}_start_unlab_epoch{config.trainer.start_unlab_epoch}"
+        if config.trainer.unlabled_ratio > 0.0
+        else ""
+    )
+
+    logging_dir /= base_unlab_path
+
+    logging_dir /= f"lrelu_split_new_class_GDFL_g{config.trainer.gamma}_fr08_fw080915"
+
+    logging_dir.mkdir(parents=True, exist_ok=True)
+    return logging_dir
+
+
+def get_device(config):
+    device = config.device.lower()
+    if device == "cpu":
+        return torch.device("cpu")
+    elif device.startswith("gpu") or device.startswith("cuda"):
+        return torch.device(f"cuda:{config.device[-1]}")
+    else:
+        raise ValueError("Unknown device")
+
+
 def load_model_dict(download_path, save_path=None, check_hash=True) -> OrderedDict:
     if download_path.startswith("http"):
         state_dict = torch.hub.load_state_dict_from_url(
