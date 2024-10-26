@@ -1,14 +1,13 @@
 import os
-import yaml
-from pathlib import Path
 import sys
-from easydict import EasyDict
 from collections import OrderedDict
-
+from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
 from accelerate import Accelerator
+from easydict import EasyDict
 from timm.models.layers import trunc_normal_
 from torch import nn
 
@@ -78,9 +77,13 @@ def resume_train_state(
     model,
     path: str,
     train_loader: torch.utils.data.DataLoader,
-    accelerator: Accelerator,
+    accelerator: Accelerator = None,
     epoch: int = -1,
 ):
+    print_fn = print
+    if accelerator is not None:
+        print_fn = print_fn
+
     try:
         # Get the most recent checkpoint
         base_path = Path(os.getcwd()) / "model_store"
@@ -104,32 +107,35 @@ def resume_train_state(
             if found:
                 epoch = ind_epoch
 
-        accelerator.print(f"try to load {str(dirs[epoch])} train stage")
+        print_fn(f"try to load {str(dirs[epoch])} train stage")
         model = load_pretrain_model(
             str(dirs[epoch] / "pytorch_model.bin"), model, accelerator
         )
         starting_epoch = int(dirs[epoch].name.replace("epoch_", "")) + 1
         step = starting_epoch * len(train_loader)
-        accelerator.print(
-            f"Load state training success ！Start from {starting_epoch} epoch"
-        )
+        print_fn(f"Load state training success ！Start from {starting_epoch} epoch")
         return model, starting_epoch, step, step
     except Exception as e:
-        accelerator.print(e)
-        accelerator.print("Load training status failed ！")
+        print_fn(e)
+        print_fn("Load training status failed ！")
         return model, 0, 0, 0
 
 
-def load_pretrain_model(pretrain_path: str, model: nn.Module, accelerator: Accelerator):
+def load_pretrain_model(
+    pretrain_path: str, model: nn.Module, accelerator: Accelerator = None
+):
+    print_fn = print
+    if accelerator is not None:
+        print_fn = print_fn
     try:
         state_dict = load_model_dict(pretrain_path)
         state_dict = {k[0].lower() + k[1:]: v for k, v in state_dict.items()}
         model.load_state_dict(state_dict)
-        accelerator.print("Successfully loaded the training model！")
+        print_fn("Successfully loaded the training model！")
         return model
     except Exception as e:
-        accelerator.print(e)
-        accelerator.print("Failed to load the training model！")
+        print_fn(e)
+        print_fn("Failed to load the training model！")
         return model
 
 
