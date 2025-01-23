@@ -414,12 +414,13 @@ if __name__ == "__main__":
                 if epoch % 3 == 0:
                     calc_unlab_metric = True
 
-                trainer.train_one_epoch(
+                trainer.train_unlabeled_one_epoch(
                     unlab_metrics,
                     config.trainer.num_epochs,
+                    config.trainer.unlab_weight,
                     epoch,
                     unlab_step,
-                    metrics=calc_unlab_metric,
+                    calc_unlab_metric=calc_unlab_metric,
                 )
                 if calc_unlab_metric:
                     unlab_metric, _ = calc_metrics_dict(

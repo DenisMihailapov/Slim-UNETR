@@ -127,5 +127,57 @@ class Trainer:
             for metric_name in metrics:
                 metrics[metric_name](y_pred=val_outputs, y=image_batch["label"])
 
-            return step
+        return step
 
+    def train_unlabeled_one_epoch(
+        self,
+        metrics,
+        num_epochs: int,
+        unlab_weight: float,
+        epoch: int,
+        step: int,
+        calc_unlab_metric: bool
+    ):
+        
+        device = next(self.model.parameters()).device
+        self.ema_model.update(self.model)
+        self.ema_model.train()
+        for i, image_batch in enumerate(self.unlab_loader):
+            image = image_batch["image"].to(device)
+            # label = image_batch["label"].to(device)
+
+            image_tf = self.transforms(image)
+            logits_tf = self.model(image_tf)
+
+            with torch.no_grad():
+                ps_label = self.ema_model(image)
+                ps_label_tf = self.transforms(ps_label, randomize=False)
+                # ps_label = self.post_trans(ps_label)
+
+            ps_loss, _ = calc_total_loss(
+                logits_tf, ps_label_tf, self.loss_functions, self.accelerator, step
+            )
+
+            ps_loss *= unlab_weight
+                
+
+            dict_values = {"Train/Unlab Loss": float(ps_loss)}
+            log =  f"Epoch [{epoch + 1}/{num_epochs}] Training [{i + 1}/{len(self.unlab_loader)}] Unlab Loss: {ps_loss:1.5f}"
+  
+
+            self.accelerator.log(values=dict_values, step=step)
+            self.accelerator.print(log, flush=True)
+            step += 1
+
+            self.accelerator.backward(ps_loss)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            
+            if calc_unlab_metric:
+                val_outputs = [self.post_trans(i) for i in logits_tf]
+                for metric_name in metrics:
+                    metrics[metric_name](y_pred=val_outputs, y=image_batch["label"])
+        
+        self.ema_model.update(self.model)
+
+        return step
