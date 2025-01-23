@@ -165,7 +165,8 @@ def val_one_epoch(
             flush=True,
         )
         step += 1
-
+    
+    print('data_flag', data_flag)
     metric, batch_acc = calc_metrics_dict(
         metrics, accelerator, data_flag, is_train=False
     )
@@ -184,7 +185,9 @@ def val_one_epoch(
 def get_experiment_dir(config, data_flag, root="logs"):
     logging_dir = Path.cwd() / root
 
-    logging_dir /= f"{data_flag}_unlab_stages_with_tflab"
+    logging_dir /= config.data_root.split("/")[-1]
+
+    logging_dir /= f"{data_flag}_unlab_stages_with_tflab_selec"
 
     logging_dir /= f"seed{config.trainer.seed}"
 
@@ -193,6 +196,8 @@ def get_experiment_dir(config, data_flag, root="logs"):
     logging_dir /= f"use_tf{config.trainer.use_transform}"
 
     logging_dir /= f"ims_{config.trainer.image_size}"
+
+    logging_dir /= f"batch_size_{config.trainer.batch_size}"
 
     logging_dir /= (
         f"rot_prob{config.trainer.rot_prob}_rot_angle{config.trainer.rot_angle}"
@@ -206,6 +211,8 @@ def get_experiment_dir(config, data_flag, root="logs"):
         if config.trainer.unlabled_ratio > 0.0
         else ""
     )
+
+    logging_dir /= "ps_post_tf"
 
     logging_dir /= base_unlab_path
 
@@ -355,7 +362,8 @@ if __name__ == "__main__":
     model.apply(_weights_init)
 
     base_exp_path_save = get_experiment_dir(config, data_flag, root="model_store")
-
+    
+    print(base_exp_path_save)
     # resume training
     if config.trainer.resume:
         model, starting_epoch, step, val_step = utils.resume_train_state(

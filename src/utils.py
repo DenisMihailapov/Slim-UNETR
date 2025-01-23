@@ -128,11 +128,9 @@ def resume_train_state(
 
     try:
         # Get the most recent checkpoint
-        base_path = Path(os.getcwd()) / "model_store"
-        base_path /= path
-        print("base_path:", base_path)
+        print("base_path:", path)
 
-        dirs = [f for f in base_path.glob("*_*") if f.is_dir()]
+        dirs = [f for f in path.glob("*_*") if f.is_dir()]
         dirs.sort(
             key=lambda f: int(f.name.split("_")[-1])
         )  # Sorts folders by date modified, most recent checkpoint is the last
@@ -164,7 +162,7 @@ def resume_train_state(
 
 
 def load_pretrain_model(
-    pretrain_path: str, model: nn.Module, accelerator: Accelerator = None
+    pretrain_path: str, model: nn.Module, accelerator: Accelerator = None, verbose = True
 ):
     print_fn = print
     if accelerator is not None:
@@ -173,7 +171,8 @@ def load_pretrain_model(
         state_dict = load_model_dict(pretrain_path)
         state_dict = {k[0].lower() + k[1:]: v for k, v in state_dict.items()}
         model.load_state_dict(state_dict)
-        print_fn("Successfully loaded the training model！")
+        if verbose:
+            print_fn("Successfully loaded the training model！")
         return model
     except Exception as e:
         print_fn(e)

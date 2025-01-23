@@ -47,7 +47,7 @@ class RandRotate(RandomizableTransform, InvertibleTrait):
             range_y=0.,
             range_z=0.,
             mode="nearest",
-            padding_mode="zeros"
+            padding_mode="border"
     ) -> None:
         RandomizableTransform.__init__(self, prob)
         self.range_x = tuple(sorted([-range_x, range_x]))

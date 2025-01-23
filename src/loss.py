@@ -41,14 +41,15 @@ def get_loss_functions(trainer_config):
     return loss_functions
 
 
-def calc_total_loss(logits, label, loss_functions, accelerator, step, train=True):
+def calc_total_loss(logits, label, loss_functions, accelerator = None, step = 0, train=True):
     log = ""
     total_loss = 0
     name_stage = "Train" if train else "Val"
     for name in loss_functions:
         loss_fn, ratio = loss_functions[name]
         loss = ratio * loss_fn(logits, label)
-        accelerator.log({f"{name_stage}/" + name: float(loss)}, step=step)
+        if accelerator is not None:
+            accelerator.log({f"{name_stage}/" + name: float(loss)}, step=step)
         log += f" {name} {float(loss):1.5f} "
         total_loss += loss
 
