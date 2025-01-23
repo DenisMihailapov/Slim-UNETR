@@ -54,6 +54,10 @@ def load_config(config_filename="config.yml", mode="r"):
         config = config.tbad_dataset
         data_flag = "tbad_dataset"
         is_HepaticVessel = False
+    elif config.is_aneurysms:
+        config = config.aneurysms
+        data_flag = "aneurysms"
+        is_HepaticVessel = False
     else:
         raise ValueError("Please set dataset in config file")
 

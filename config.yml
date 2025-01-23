@@ -11,6 +11,8 @@ is_lung_big_model: False
 
 is_tbad_dataset: True
 
+is_aneurysms: False
+
 
 
 brats2021:
@@ -351,3 +353,56 @@ tbad_dataset:
     r_up: [ 4, 2, 2, 2 ]
     dropout: 0.3    
     use_split_classes: True
+
+
+aneurysms:
+  data_root: ../med_data/ai_aneurysms_msd_crop320_rs128_selected_74
+  device: cuda1
+  trainer:
+    seed: 42
+    num_epochs: 600
+    warmup: 60
+    train_ratio: 0.8
+    batch_size: 8
+    lr: 0.002
+    min_lr: 0.00005
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
+    rot_prob: 0.7
+    rot_angle: 0.62830 # 2*pi/10
+    flip_prob: 0.2
+
+    dice_loss_ratio: 1.
+    #focal_class_weights: [0.8, 0.9, 1.5]
+    focal_loss_ratio: 0.8
+    gamma: 2.0
+
+    start_unlab_epoch: 30
+    unlabled_ratio: 0.0
+    unlab_weight: 0.3
+    only_labeled: False
+    use_transform: False
+
+    image_size: 128
+    resume: True
+
+
+  finetune:
+    checkpoint: aneurysms
+
+  slim_unetr:
+    in_channels: 1
+    out_channels: 1
+    embed_dim: 96
+    embedding_dim: 64
+    channels: [ 24, 48, 48 ]
+    blocks: [ 3, 3, 3, 3 ]
+    heads: [ 1, 2, 2, 2 ]
+    r: [ 4, 2, 2, 1 ]
+    r_up: [ 4, 2, 2, 2 ]
+    dropout: 0.3
+    use_split_classes: False

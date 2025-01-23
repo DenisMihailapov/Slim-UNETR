@@ -450,6 +450,7 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
     torch.utils.data.DataLoader,
     Optional[torch.utils.data.DataLoader],
 ]:
+        
     if data_flag in ["hepatic_vessel2021", "heart"]:
         dataset_images = load_dataset_images(config.data_root)
         train_transform, val_transform = get_MSD_transforms(config)
@@ -461,7 +462,7 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
         elif data_flag in ["acute", "lung", "lung_big_model"]:
             dataset_images = load_dataset_images(config.data_root)
             train_transform, val_transform = get_Acute_transforms(config)
-        elif data_flag in ["tbad_dataset"]:
+        elif data_flag in ["tbad_dataset", "aneurysms"]:
             dataset_images = load_dataset_images(config.data_root)
             train_transform, unlab_train_transform, val_transform = (
                 get_tbad_lab_unlab_transforms(config)

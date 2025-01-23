@@ -59,7 +59,7 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True, unlab=Fals
                     f"{mode}/Tumors {metric_name}": float(batch_acc[1]),
                 }
             )
-        elif data_flag in ["acute", "lung", "lung_big_model"]:  # , "tbad_dataset"]:
+        elif data_flag in ["acute", "lung", "lung_big_model", "aneurysms"]:  # , "tbad_dataset"]:
             metrics_dict.update(
                 {
                     f"Val/mean {metric_name}": float(batch_acc),

@@ -59,6 +59,8 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
                     f"{mode}/FL {metric_name}": float(batch_acc[2]),
                 }
             )
+        elif data_flag == "aneurysms":
+            metrics_dict[f"{mode}/aneur {metric_name}"] = float(batch_acc[0])
         else:
             metrics_dict.update(
                 {
