@@ -81,10 +81,10 @@ def get_center_mask(np_mask):
     return coord.mean(0)
 
 
-def save_predict(data_batch, pred, path):
+def save_predict(data_batch, pred, path: Path):
 
     path = Path(path)
-    sample_name = Path(data_batch['label_meta_dict']['filename_or_obj'][0]).stem[:-4]
+    sample_name = Path(data_batch['label_meta_dict']['filename_or_obj'][0]).stem.split('_')[0]
 
     img = np.array(data_batch["image"][0].cpu())
     lab = np.array(data_batch["label"][0].cpu())
@@ -287,7 +287,7 @@ if __name__ == "__main__":
             post_trans,
             accelerator,
             epoch=epoch,
-            path=f'./{data_flag}/save_eval_slim_/epoch_{epoch}',
+            path=path / f'epoch_{epoch}',
             device=device
         )
 
