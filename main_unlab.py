@@ -188,10 +188,6 @@ def get_experiment_dir(config, data_flag, root="logs"):
 
     logging_dir /= config.data_root.split("/")[-1]
 
-    logging_dir /= f"{data_flag}_unlab_stages_with_tflab_selec"
-
-    logging_dir /= f"seed{config.trainer.seed}"
-
     logging_dir /= f"epoch{config.trainer.num_epochs}"
 
     logging_dir /= f"use_tf{config.trainer.use_transform}"
@@ -207,15 +203,17 @@ def get_experiment_dir(config, data_flag, root="logs"):
     logging_dir /= f"lrelu_split_new_class_GDFL_g{config.trainer.gamma}_fr08_fw080915"
 
     base_unlab_path = "only_labeled_" if config.trainer.only_labeled else ""
-    base_unlab_path += (
-        f"unlab_ratio{config.trainer.unlabled_ratio}_unlab_weight{config.trainer.unlab_weight}_start_unlab_epoch{config.trainer.start_unlab_epoch}"
-        if config.trainer.unlabled_ratio > 0.0
-        else ""
-    )
+    
+    if config.trainer.unlabled_ratio > 0.0:
+        
+        base_unlab_path += f"unlab_ratio{config.trainer.unlabled_ratio}_unlab_weight{config.trainer.unlab_weight}_start_unlab_epoch{config.trainer.start_unlab_epoch}"
 
-    logging_dir /= "ps_post_tf"
+        if not config.trainer.only_labeled:
+            logging_dir /= "ps_post_tf"
 
     logging_dir /= base_unlab_path
+
+    logging_dir /= f"seed{config.trainer.seed}"
 
     logging_dir.mkdir(parents=True, exist_ok=True)
     return logging_dir
