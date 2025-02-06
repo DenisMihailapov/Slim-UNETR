@@ -1,4 +1,5 @@
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 from pathlib import Path
 from typing import Dict, Tuple
@@ -232,7 +233,6 @@ def get_device(config):
 
 if __name__ == "__main__":
 
-    os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
     config, data_flag, is_HepaticVessel = load_config(
         config_filename="config.yml", mode="r"
     )
