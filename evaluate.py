@@ -10,7 +10,7 @@ import numpy as np
 import nibabel as nib
 import torch
 from tqdm import tqdm
-import yaml
+import json
 from accelerate import Accelerator
 from monai.utils import ensure_tuple_rep
 from objprint import objstr
@@ -180,6 +180,12 @@ if __name__ == "__main__":
     Logger(logging_dir)
     accelerator.init_trackers(os.path.split(__file__)[-1].split(".")[0])
     accelerator.print(objstr(config))
+
+    path = Path(f'./{data_flag}/save_eval_slim_tbda')
+    path.mkdir(parents=True, exist_ok=True)
+    with (path / "config.json").open("w") as fp:
+        json.dump(config , fp)
+    
 
     accelerator.print("Load Model...")
     model = SlimUNETR(**config.slim_unetr)
