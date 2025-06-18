@@ -9,6 +9,8 @@ import monai
 import numpy as np
 import nibabel as nib
 import torch
+from torchinfo import summary
+
 from tqdm import tqdm
 import json
 from accelerate import Accelerator
@@ -19,10 +21,9 @@ from timm.optim import optim_factory
 from src import utils
 from src.loader import get_dataloader, get_tbad_lab_unlab_transforms, load_dataset_images
 from src.optimizer import LinearWarmupCosineAnnealingLR
-from src.SlimUNETR.SlimUNETR import SlimUNETR
-from monai.networks.nets import UNet
+from src.networks import create_model
 from src.utils import Logger, load_config, same_seeds
-from main_unlab_unet import get_experiment_dir
+from main_unlab_unet import get_new_experiment_dir
 
 
 def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True, unlab=False):
@@ -49,7 +50,7 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True, unlab=Fals
                     f"{mode}/Tumors {metric_name}": float(batch_acc[1]),
                 }
             )
-        elif data_flag in ["acute", "lung", "lung_big_model", "aneurysms"]:  # , "tbad_dataset"]:
+        elif data_flag in ["acute", "lung", "lung_big_model", "aneurysms", "heart"]:  # , "tbad_dataset"]:
             metrics_dict.update(
                 {
                     f"Val/mean {metric_name}": float(batch_acc),
@@ -84,35 +85,38 @@ def get_center_mask(np_mask):
 def save_predict(data_batch, pred, path: Path):
 
     path = Path(path)
-    sample_name = Path(data_batch['label_meta_dict']['filename_or_obj'][0]).stem.split('_')[0]
+    sample_name = Path(data_batch['label_meta_dict']['filename_or_obj'][0]).stem.split('.')[0]
 
     img = np.array(data_batch["image"][0].cpu())
     lab = np.array(data_batch["label"][0].cpu())
     out = np.array(pred[0].cpu())
 
-    nii = np.stack((lab[0], out[0])).transpose(1, 2, 3, 0)
-    nii = nib.Nifti1Image(nii, affine=np.array(data_batch['label_meta_dict']['affine'][0].cpu()))
+    nii = nib.Nifti1Image(lab[0], affine=np.array(data_batch['label_meta_dict']['affine'][0].cpu()))
+    nib.save(nii, path / f'lab_{sample_name}_{np.sum(lab)}.nii.gz') 
     
-    if lab.sum() > 0:
-        lab_c = get_center_mask(lab)
-        out_c = get_center_mask(out)
-        dist = round(np.abs(lab_c - out_c).mean(), 3) 
-    else:
-        dist = -1
+    # if lab.sum() > 0:
+    #     lab_c = get_center_mask(lab)
+    #     out_c = get_center_mask(out)
+    #     dist = round(np.abs(lab_c - out_c).mean(), 3) 
+    # else:
+    #     dist = -1
 
-    nib.save(nii, path / f'lab_{sample_name}_{np.sum(lab)}_{np.sum(out)}_metr{round(1. - float(np.sum(np.abs(lab - out)) / (max(np.sum(lab), np.sum(out))) + 1e-6), 3)}_dist{dist}.nii.gz')
+    nii = nib.Nifti1Image(out[0], affine=np.array(data_batch['label_meta_dict']['affine'][0].cpu()))
+    nib.save(nii, path / f'pred_{sample_name}_{np.sum(out)}.nii.gz')   
 
-    nii = nib.Nifti1Image(img[0], affine=np.array(data_batch['label_meta_dict']['affine'][0].cpu()))
+    # nib.save(nii, path / f'lab_{sample_name}_{np.sum(lab)}_{np.sum(out)}_metr{round(1. - float(np.sum(np.abs(lab - out)) / (max(np.sum(lab), np.sum(out))) + 1e-6), 3)}_dist{dist}.nii.gz')
+
+    nii = nib.Nifti1Image(img[0], affine=np.array(data_batch['image_meta_dict']['affine'][0].cpu()))
     nib.save(nii, path / f'img_{sample_name}.nii.gz')
 
 
 
 @torch.no_grad()
-def val_one_epoch(
+def val_and_save_one_epoch(
     model: torch.nn.Module,
     data_flag: str,
     inference: monai.inferers.Inferer,
-    val_loader: torch.utils.data.DataLoader,
+    data_loader: torch.utils.data.DataLoader,
     metrics: Dict[str, monai.metrics.CumulativeIterationMetric],
     post_trans: monai.transforms.Compose,
     accelerator: Accelerator,
@@ -125,19 +129,24 @@ def val_one_epoch(
     path.mkdir(parents=True, exist_ok=True)
 
     model.eval()
-    for data_batch in tqdm(val_loader):
+    for data_batch in tqdm(data_loader):
         logits = inference(data_batch["image"].to(device), model)
         val_outputs = [post_trans(i) for i in logits]
  
         save_predict(data_batch, val_outputs, path)
+        
         for metric_name in metrics:
             metrics[metric_name](y_pred=val_outputs, y=data_batch["label"].to(device))
   
-    batch_acc, metrics_dict = calc_metrics_dict(
+    _, metrics_dict = calc_metrics_dict(
         metrics, accelerator, data_flag, is_train=False
     )
 
-    return batch_acc, metrics_dict
+    accelerator.print(
+        f"Epoch [{epoch}/{config.trainer.num_epochs}] metric {metrics_dict}"
+    )
+
+    return metrics_dict
 
 
 def load_sampels(config):
@@ -163,6 +172,18 @@ def load_sampels(config):
     return loader, data_list
 
 
+def get_sampels_name(data_loader):
+    
+    sampels = []
+    for data_batch in tqdm(data_loader):
+        print(data_batch.keys())
+        sampels.extend(
+            Path(sample_name).stem.split('.')[0]
+            for sample_name in data_batch['label_meta_dict']['filename_or_obj']
+        )
+        
+    return sampels
+
 
 if __name__ == "__main__":
 
@@ -170,9 +191,12 @@ if __name__ == "__main__":
     config, data_flag, is_HepaticVessel = load_config(
         config_filename="config.yml", mode="r"
     )
+    print(config)
+
+    config.trainer.start_unlab_epoch = int(config.trainer.start_unlab_epoch_ratio * config.trainer.num_epochs)
 
     same_seeds(config.trainer.seed)
-    logging_dir = get_experiment_dir(config, data_flag)
+    logging_dir = get_new_experiment_dir(config, data_flag)
 
     accelerator = Accelerator(
         cpu=False, log_with=["tensorboard"], project_dir=logging_dir
@@ -181,29 +205,31 @@ if __name__ == "__main__":
     accelerator.init_trackers(os.path.split(__file__)[-1].split(".")[0])
     accelerator.print(objstr(config))
 
-    path = Path(f'./{data_flag}/save_eval_slim_tbda')
+    log_metric_dict = dict()
+
+    ds_name = config.data_root.split('/')[-1]
+
+    path = Path(f'./eval/{ds_name}/save_unet_aniv_split')
     path.mkdir(parents=True, exist_ok=True)
     with (path / "config.json").open("w") as fp:
         json.dump(config , fp)
     
 
     accelerator.print("Load Model...")
-    model = SlimUNETR(**config.slim_unetr)
-    # model = UNet(
-    #     spatial_dims=3,
-    #     in_channels=1,
-    #     out_channels=1,
-    #     channels=(24, 48, 60),
-    #     strides=(2, 1),
-    #     dropout=0.3,
-    # )
+    model = create_model(config, n_filters=8)
 
     accelerator.print("Load Dataloader...")
     config_copy = copy.copy(config)
 
-    train_loader, val_loader, unlab_loader = get_dataloader(config, data_flag, needs_unlab=True)
-    print(unlab_loader)
+    train_loader, val_loader, unlab_loader = get_dataloader(config, data_flag, needs_unlab=False)
+
+    print(train_loader.dataset)
+
+    # val_names   = get_sampels_name(val_loader)
+    # train_names = get_sampels_name(train_loader)
+
     loader, data_list = load_sampels(config)
+    # loader_names = get_sampels_name(loader)
 
     inference = monai.inferers.SlidingWindowInferer(
         roi_size=ensure_tuple_rep(config.trainer.image_size, dim=3),
@@ -256,16 +282,19 @@ if __name__ == "__main__":
         model, optimizer, scheduler, loader
     )
 
-    base_exp_path_save = get_experiment_dir(config, data_flag, root="model_store", model='')
+    base_exp_path_save = get_new_experiment_dir(config, data_flag, root="model_store")
 
-    print(base_exp_path_save)
-    print(sum(p.numel() for p in model.parameters()))
+    print(list(base_exp_path_save.iterdir()))
 
-    list_epochs = list(base_exp_path_save.iterdir())[1:] 
+    exit()
 
-    print(list_epochs)
+    list_epochs = list(base_exp_path_save.iterdir())[1:]
 
-    for epoch_folder in sorted(list_epochs, key=lambda x: int(x.name.split('_')[-1]))[1:]:
+    print('Start eval')
+    print(sorted(list_epochs, key=lambda x: int(x.name.split('_')[-1]))[10:])
+
+
+    for epoch_folder in sorted(list_epochs, key=lambda x: int(x.name.split('_')[-1]))[10:]:
 
         epoch = int(epoch_folder.name.split('_')[-1])
 
@@ -278,7 +307,7 @@ if __name__ == "__main__":
         device = next(model.parameters()).device
 
         # val
-        val_metric, metrics_dict = val_one_epoch(
+        metrics_dict = val_and_save_one_epoch(
             model,
             data_flag,
             inference,
@@ -291,13 +320,16 @@ if __name__ == "__main__":
             device=device
         )
 
+        log_metric_dict.update(
+            {epoch: metrics_dict}
+        )
 
-        unlab_list = [] 
-        for data_batch in tqdm(unlab_loader):
-            unlab_list.extend(data_batch['label_meta_dict']['filename_or_obj'])
+
+        # unlab_list = [] 
+        # for data_batch in tqdm(unlab_loader):
+        #     unlab_list.extend(data_batch['label_meta_dict']['filename_or_obj'])
         
-        pprint(unlab_list)
-            
-        accelerator.print(
-        f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] metric {metrics_dict}"
-    )
+        # pprint(unlab_list)
+
+    with (path / "metrics.json").open("w") as fp:
+        json.dump(log_metric_dict , fp)

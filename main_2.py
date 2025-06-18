@@ -285,6 +285,8 @@ if __name__ == "__main__":
         config_filename="config.yml", mode="r"
     )
 
+    config.trainer.start_unlab_epoch = int(config.trainer.start_unlab_epoch_ratio * config.trainer.num_epochs)
+
     same_seeds(config.trainer.seed)
     logging_dir = get_experiment_dir(config, data_flag, root="log")
 

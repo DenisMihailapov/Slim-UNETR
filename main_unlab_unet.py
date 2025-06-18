@@ -1,45 +1,51 @@
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Dict, Tuple
-from easydict import EasyDict
 
-from objprint import objstr
-
-import torch
-from torch import nn
 import monai
-from monai.utils import ensure_tuple_rep
+from torchinfo import summary
+import torch
 from accelerate import Accelerator
+from easydict import EasyDict
+from monai.utils import ensure_tuple_rep
+from objprint import objstr
 from timm.optim import optim_factory
+from torch import nn
+from tqdm import tqdm
 
+from src.networks import create_model
 from src import utils
+from monai.networks.nets import UNet, VNet
 from src.loader import get_dataloader
 from src.optimizer import LinearWarmupCosineAnnealingLR
-from src.SlimUNETR.SlimUNETR import SlimUNETR
+from src.unlab.lab_unlab_trainer import Trainer
 from src.utils import Logger, load_config, same_seeds
 
 
-def calc_total_loss(logits, label, loss_functions):
+def calc_total_loss(logits, label, loss_functions, accelerator, step, train=True):
     log = ""
     total_loss = 0
+    name_stage = "Train" if train else "Val"
     for name in loss_functions:
         loss_fn, ratio = loss_functions[name]
         loss = ratio * loss_fn(logits, label)
-        accelerator.log({"Train/" + name: float(loss)}, step=step)
+        accelerator.log({f"{name_stage}/" + name: float(loss)}, step=step)
         log += f" {name} {float(loss):1.5f} "
         total_loss += loss
 
     return total_loss, log
 
 
-def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
+def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True, unlab=False):
     metrics_dict = {}
     mode = "Train" if is_train else "Val"
-    print(metrics.keys())
+    if unlab:
+        mode = "Unlab_" + mode
+
     for metric_name in metrics:
         batch_acc = metrics[metric_name].aggregate()
-        print(batch_acc)
+        # print(batch_acc)
         if accelerator.num_processes > 1:
             batch_acc = (
                 accelerator.reduce(batch_acc.to(accelerator.device))
@@ -55,7 +61,7 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
                     f"{mode}/Tumors {metric_name}": float(batch_acc[1]),
                 }
             )
-        elif data_flag in ["acute", "lung", "lung_big_model"]:  # , "tbad_dataset"]:
+        elif data_flag in ["acute", "lung", "lung_big_model", "aneurysms", "heart"]:  # , "tbad_dataset"]:
             metrics_dict.update(
                 {
                     f"Val/mean {metric_name}": float(batch_acc),
@@ -81,35 +87,28 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True):
     return metrics_dict, batch_acc
 
 
-def regularization_loss(hidden_states_out):
-    pass
-
-
-def train_one_epoch(
+def train_loop(
     model: torch.nn.Module,
-    config: EasyDict,
-    data_flag: str,
     loss_functions: Dict[str, Tuple[torch.nn.modules.loss._Loss, float]],
     train_loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler._LRScheduler,
     metrics: Dict[str, monai.metrics.CumulativeIterationMetric],
     post_trans: monai.transforms.Compose,
     accelerator: Accelerator,
+    num_epochs: int,
     epoch: int,
     step: int,
 ):
-    # train
-    model.train()
+    device = next(model.parameters()).device
     for i, image_batch in enumerate(train_loader):
-        logits = model(image_batch["image"])
-        # print(logits.shape)
-        # print(image_batch["label"].shape)
-        total_loss, _ = calc_total_loss(logits, image_batch["label"], loss_functions)
+        logits = model(image_batch["image"].to(device))
+        total_loss, log = calc_total_loss(
+            logits, image_batch["label"].to(device), loss_functions, accelerator, step
+        )
 
         accelerator.log(values={"Train/Total Loss": float(total_loss)}, step=step)
         accelerator.print(
-            f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training [{i + 1}/{len(train_loader)}] Loss: {total_loss:1.5f}",
+            f"Epoch [{epoch + 1}/{num_epochs}] Training [{i + 1}/{len(train_loader)}] Loss: {total_loss:1.5f} {log}",
             flush=True,
         )
         step += 1
@@ -120,14 +119,8 @@ def train_one_epoch(
 
         val_outputs = [post_trans(i) for i in logits]
         for metric_name in metrics:
-            metrics[metric_name](y_pred=val_outputs, y=image_batch["label"])
+            metrics[metric_name](y_pred=val_outputs, y=image_batch["label"].to(device))
 
-    scheduler.step(epoch)
-    metric, _ = calc_metrics_dict(metrics, accelerator, data_flag, is_train=True)
-    accelerator.print(
-        f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training metric {metric}"
-    )
-    accelerator.log(metric, step=epoch)
     return step
 
 
@@ -147,21 +140,22 @@ def val_one_epoch(
 ):
     # val
     device = next(model.parameters()).device
-    print(device)
+
     model.eval()
     for i, image_batch in enumerate(val_loader):
         logits = inference(image_batch["image"].to(device), model)
-        total_loss = 0
-        log = ""
-        for name in loss_functions:
-            loss_fn, ratio = loss_functions[name]
-            loss = ratio * loss_fn(logits, image_batch["label"].to(device))
-            accelerator.log({"Val/" + name: float(loss)}, step=step)
-            log += f" {name} {float(loss):1.5f} "
-            total_loss += loss
+        total_loss, log = calc_total_loss(
+            logits,
+            image_batch["label"].to(device),
+            loss_functions,
+            accelerator,
+            step,
+            train=False,
+        )
+
         val_outputs = [post_trans(i) for i in logits]
         for metric_name in metrics:
-            metrics[metric_name](y_pred=val_outputs, y=image_batch["label"])
+            metrics[metric_name](y_pred=val_outputs, y=image_batch["label"].to(device))
         accelerator.log(
             {
                 "Val/Total Loss": float(total_loss),
@@ -173,7 +167,8 @@ def val_one_epoch(
             flush=True,
         )
         step += 1
-
+    
+    print('data_flag', data_flag)
     metric, batch_acc = calc_metrics_dict(
         metrics, accelerator, data_flag, is_train=False
     )
@@ -181,7 +176,6 @@ def val_one_epoch(
     accelerator.print(
         f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation metric {metric}"
     )
-    print(f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Validation metric {metric}")
     accelerator.log(metric, step=epoch)
     return (
         torch.Tensor([metric["Val/mean dice_metric"]]).to(accelerator.device),
@@ -189,22 +183,91 @@ def val_one_epoch(
         step,
     )
 
-
-def get_experiment_dir(config, data_flag, root="logs"):
+def get_new_experiment_dir(config, data_flag, root="logs"):
     logging_dir = Path.cwd() / root
 
-    logging_dir /= f"{data_flag}_orig"
+    logging_dir /= config.data_root.split("/")[-1]
+    
+    base_unlab_path = "exp_"
+    if config.trainer.only_labeled:
+        base_unlab_path += "only_labeled_"
+    
+    if config.trainer.unlabled_ratio > 0.0:
+        base_unlab_path += (
+            f"unlab_ratio{config.trainer.unlabled_ratio}_"
+            f"unlab_weight{config.trainer.unlab_weight}_"
+            f"start_unlab_epoch{config.trainer.start_unlab_epoch}"
+        )
+
+    logging_dir /= base_unlab_path
+
+    logging_dir /= f"{data_flag}_{config.model}"
 
     logging_dir /= f"seed{config.trainer.seed}"
 
     logging_dir /= f"epoch{config.trainer.num_epochs}"
 
+    logging_dir /= f"use_tf{config.trainer.use_transform}"
+
     logging_dir /= f"ims_{config.trainer.image_size}"
+
+    logging_dir /= f"batch_size_{config.trainer.batch_size}"
+
+    logging_dir /= (
+        f"rot_prob{config.trainer.rot_prob}_rot_angle{config.trainer.rot_angle}"
+    )
 
     logging_dir /= f"lrelu_split_new_class_GDFL_g{config.trainer.gamma}_fr08_fw080915"
 
-    logging_dir.mkdir(parents=True, exist_ok=True)
     return logging_dir
+
+
+def get_experiment_dir(config, data_flag, root="logs", model=''):
+    logging_dir = Path.cwd() / root
+
+    logging_dir /= config.data_root.split("/")[-1]
+
+    if model:
+        model = "_" + model  
+
+    logging_dir /= f"_{data_flag}_unlab_stages_with_tflab_selec" + model
+
+    logging_dir /= f"seed{config.trainer.seed}"
+
+    logging_dir /= f"epoch{config.trainer.num_epochs}"
+
+    logging_dir /= f"use_tf{config.trainer.use_transform}"
+
+    logging_dir /= f"ims_{config.trainer.image_size}"
+
+    logging_dir /= f"batch_size_{config.trainer.batch_size}"
+
+    logging_dir /= (
+        f"rot_prob{config.trainer.rot_prob}_rot_angle{config.trainer.rot_angle}"
+    )
+
+    logging_dir /= f"lrelu_split_new_class_GDFL_g{config.trainer.gamma}_fr08_fw080915"
+
+    base_unlab_path = "only_labeled_" if config.trainer.only_labeled else ""
+    base_unlab_path += (
+        f"unlab_ratio{config.trainer.unlabled_ratio}_unlab_weight{config.trainer.unlab_weight}_start_unlab_epoch{config.trainer.start_unlab_epoch}"
+        if config.trainer.unlabled_ratio > 0.0
+        else ""
+    )
+
+    logging_dir /= base_unlab_path
+
+    return logging_dir
+
+
+def get_device(config):
+    device = config.device.lower()
+    if device == "cpu":
+        return torch.device("cpu")
+    elif device.startswith("gpu") or device.startswith("cuda"):
+        return torch.device(f"cuda:{config.device[-1]}")
+    else:
+        raise ValueError("Unknown device")
 
 
 if __name__ == "__main__":
@@ -214,9 +277,13 @@ if __name__ == "__main__":
         config_filename="config.yml", mode="r"
     )
 
-    same_seeds(config.trainer.seed)
-    logging_dir = get_experiment_dir(config, data_flag, root="log")
+    config.trainer.start_unlab_epoch = int(config.trainer.start_unlab_epoch_ratio * config.trainer.num_epochs)
 
+    same_seeds(config.trainer.seed)
+    logging_dir = get_new_experiment_dir(config, data_flag, model='unet')
+    logging_dir.mkdir(parents=True, exist_ok=True)
+
+    torch.cuda.set_device(get_device(config))
     accelerator = Accelerator(
         cpu=False, log_with=["tensorboard"], project_dir=str(logging_dir)
     )
@@ -225,10 +292,16 @@ if __name__ == "__main__":
     accelerator.print(objstr(config))
 
     accelerator.print("Load Model...")
-    model = SlimUNETR(**config.slim_unetr)
+    model = VNet(
+        spatial_dims=3,
+        in_channels=config.slim_unetr.in_channels,
+        out_channels=config.slim_unetr.out_channels,
+        dropout_prob_down=config.slim_unetr.dropout,
+    )
+
 
     accelerator.print("Load Dataloader...")
-    train_loader, val_loader, _ = get_dataloader(
+    train_loader, val_loader, unlab_loader = get_dataloader(
         config, data_flag, needs_unlab=not config.trainer.only_labeled
     )
 
@@ -244,7 +317,25 @@ if __name__ == "__main__":
             reduction=monai.utils.MetricReduction.MEAN_BATCH,
             get_not_nans=False,
         ),
-        # 'hd95_metric': monai.metrics.HausdorffDistanceMetric(percentile=95, include_background=True, reduction=monai.utils.MetricReduction.MEAN_BATCH, get_not_nans=False)
+        # 'hd95_metric': monai.metrics.HausdorffDistanceMetric(
+        #     percentile=95,
+        #     include_background=True,
+        #     reduction=monai.utils.MetricReduction.MEAN_BATCH,
+        #     get_not_nans=False
+        # )
+    }
+    unlab_metrics = {
+        "dice_metric": monai.metrics.DiceMetric(
+            include_background=True,
+            reduction=monai.utils.MetricReduction.MEAN_BATCH,
+            get_not_nans=False,
+        ),
+        # 'hd95_metric': monai.metrics.HausdorffDistanceMetric(
+        #     percentile=95,
+        #     include_background=True,
+        #     reduction=monai.utils.MetricReduction.MEAN_BATCH,
+        #     get_not_nans=False
+        # )
     }
     post_trans = monai.transforms.Compose(
         [
@@ -291,56 +382,107 @@ if __name__ == "__main__":
     }
 
     step = 0
-    best_eopch = -1
+    best_epoch = -1
     val_step = 0
     starting_epoch = 0
     best_acc = 0
     best_class = []
 
-    model, optimizer, scheduler, train_loader, val_loader = accelerator.prepare(
-        model, optimizer, scheduler, train_loader, val_loader
+    epoch = -1
+
+    model, optimizer, scheduler, train_loader, val_loader, unlab_loader = (
+        accelerator.prepare(
+            model, optimizer, scheduler, train_loader, val_loader, unlab_loader
+        )
     )
 
-    def _weights_init(m):
+    # def _weights_init(m):
 
-        classname = m.__class__.__name__
+    #     classname = m.__class__.__name__
 
-        if isinstance(m, (nn.Conv3d, nn.Linear, nn.ConvTranspose3d)):
-            nn.init.kaiming_uniform_(m.weight, a=10e-6)
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-        elif classname.find("Norm") != -1:
-            m.weight.data.fill_(10e-7)
-            nn.init.zeros_(m.bias)
+    #     if isinstance(m, (nn.Conv3d, nn.Linear, nn.ConvTranspose3d)):
+    #         nn.init.kaiming_uniform_(m.weight, a=10e-6)
+    #         if m.bias is not None:
+    #             nn.init.zeros_(m.bias)
+    #     elif classname.find("Norm") != -1:
+    #         m.weight.data.fill_(10e-7)
+    #         nn.init.zeros_(m.bias)
 
-    model.apply(_weights_init)
+    # model.apply(_weights_init)
 
-    base_exp_path = get_experiment_dir(config, data_flag, root="model_store")
+    base_exp_path_save = get_new_experiment_dir(config, data_flag, root="model_store", model='unet')
+    base_exp_path_save.mkdir(parents=True, exist_ok=True)
 
     # resume training
     if config.trainer.resume:
         model, starting_epoch, step, val_step = utils.resume_train_state(
-            model, base_exp_path, train_loader, accelerator
+            model, base_exp_path_save, train_loader, accelerator, epoch=epoch
         )
+
+    trainer = Trainer(
+        model,
+        train_loader,
+        unlab_loader,
+        optimizer=optimizer,
+        accelerator=accelerator,
+        loss_functions=loss_functions,
+        post_trans=post_trans,
+        cfg=config.trainer,
+    )
 
     # Start Training
     accelerator.print("Start Training!")  # type: ignore
-    for epoch in range(starting_epoch, config.trainer.num_epochs):
+
+    for epoch in tqdm(range(starting_epoch, config.trainer.num_epochs), ncols=70):
+
+        model.train()
+
         # train
-        step = train_one_epoch(
-            model,
-            config,
-            data_flag,
-            loss_functions,
-            train_loader,
-            optimizer,
-            scheduler,
+        unlab_step = step
+
+        step = trainer.train_labeled_one_epoch(
             metrics,
-            post_trans,
-            accelerator,
+            config.trainer.num_epochs,
             epoch,
             step,
+            config.trainer.use_transform,
         )
+
+        metric, _ = calc_metrics_dict(metrics, accelerator, data_flag, is_train=True)
+        accelerator.log(metric, step=epoch)
+        accelerator.print(
+            f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training metric {metric}"
+        )
+
+        if config.trainer.unlabled_ratio > 0.0:
+            if (
+                epoch > config.trainer.start_unlab_epoch
+                and not config.trainer.only_labeled
+            ):
+                calc_unlab_metric = False
+                if epoch % 3 == 0:
+                    calc_unlab_metric = True
+
+                trainer.train_unlabeled_one_epoch(
+                    unlab_metrics,
+                    config.trainer.num_epochs,
+                    config.trainer.unlab_weight,
+                    epoch,
+                    unlab_step,
+                    calc_unlab_metric=calc_unlab_metric,
+                )
+
+                if calc_unlab_metric:
+                    unlab_metric, _ = calc_metrics_dict(
+                        unlab_metrics, accelerator, data_flag, is_train=True, unlab=True
+                    )
+                    accelerator.log(unlab_metric, step=epoch)
+                    accelerator.print(
+                        f"Epoch [{epoch + 1}/{config.trainer.num_epochs}] Training unlab metric {unlab_metric}"
+                    )
+
+        accelerator.print("\n")
+        scheduler.step(epoch)
 
         # val
         mean_acc, batch_acc, val_step = val_one_epoch(
@@ -363,14 +505,15 @@ if __name__ == "__main__":
 
         # save model
         if mean_acc > best_acc:
-            accelerator.save_state(output_dir=f"{base_exp_path}/best")
+            accelerator.save_state(output_dir=f"{base_exp_path_save}/best")
             best_acc = mean_acc
             best_class = batch_acc
-            best_eopch = epoch
+            best_epoch = epoch
 
-        if epoch % 10 == 0:
-            accelerator.save_state(output_dir=f"{base_exp_path}/epoch_{epoch}")
+        if epoch % 50 == 0:
+            accelerator.save_state(output_dir=f"{base_exp_path_save}/epoch_{epoch}")
 
+    accelerator.save_state(output_dir=f"{base_exp_path_save}/epoch_{epoch}")
     accelerator.print(f"best dice mean acc: {best_acc}")
     accelerator.print(f"best dice accs: {best_class}")
     sys.exit(1)

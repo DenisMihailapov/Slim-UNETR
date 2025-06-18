@@ -60,7 +60,8 @@ def calc_metrics_dict(metrics, accelerator, data_flag, is_train=True, unlab=Fals
                     f"{mode}/Tumors {metric_name}": float(batch_acc[1]),
                 }
             )
-        elif data_flag in ["acute", "lung", "lung_big_model", "aneurysms"]:  # , "tbad_dataset"]:
+        elif data_flag in ["acute", "lung", "lung_big_model", "aneurysms", "heart"]:  # , "tbad_dataset"]:
+            print(batch_acc)
             metrics_dict.update(
                 {
                     f"Val/mean {metric_name}": float(batch_acc),
@@ -236,7 +237,10 @@ if __name__ == "__main__":
     )
 
     same_seeds(config.trainer.seed)
-    logging_dir = get_experiment_dir(config, data_flag)
+    logging_dir = get_experiment_dir(config, data_flag, root='logs_new')
+
+    print(logging_dir)
+    print()
 
     torch.cuda.set_device(get_device(config))
     accelerator = Accelerator(
@@ -311,7 +315,7 @@ if __name__ == "__main__":
         "focal_loss": (
             monai.losses.FocalLoss(  # sigmoid_focal_loss FL(pt) = -alpha * (1 - pt)**gamma * log(pt)
                 to_onehot_y=False,
-                weight=config.trainer.focal_class_weights,
+                # weight=config.trainer.focal_class_weights,
                 gamma=config.trainer.gamma,
             ),
             config.trainer.focal_loss_ratio,
@@ -332,6 +336,7 @@ if __name__ == "__main__":
 
     step = 0
     best_epoch = -1
+    config.trainer.start_unlab_epoch = int(config.trainer.start_unlab_epoch_ratio * config.trainer.num_epochs)
     val_step = 0
     starting_epoch = 0
     best_acc = 0

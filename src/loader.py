@@ -110,6 +110,7 @@ class ConvertToMultiChannelBasedOnBratsClassesd_for_MSD(monai.transforms.MapTran
 
 def load_brats2021_dataset_images(root):
     images_path = os.listdir(root)
+    
     images_list = []
     for path in images_path:
         image_path = root + "/" + path + "/" + path
@@ -223,18 +224,18 @@ def get_tbad_lab_unlab_transforms(
             monai.transforms.LoadImaged(keys=["image", "label"], image_only=False),
             monai.transforms.EnsureChannelFirstd(keys="image"),
             monai.transforms.EnsureTyped(keys=["image", "label"]),
-            # monai._transforms.RandRotated(
-            #     keys=["image", "label"],
-            #     prob=config.trainer.rot_prob,
-            #     range_z=0.0 * np.pi,
-            # ),
+            monai.transforms.RandRotated(
+                keys=["image", "label"],
+                prob=config.trainer.rot_prob,
+                range_z=0.0 * np.pi,
+            ),
             # monai._transforms.CenterSpatialCropD(
             #     keys=["image", "label"],
             #     roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
             # ),
-            # monai._transforms.NormalizeIntensityd(
-            #     keys="image", nonzero=True, channel_wise=True
-            # ),
+            monai.transforms.NormalizeIntensityd(
+                keys="image", nonzero=True, channel_wise=True
+            ),
             monai.transforms.ToTensord(keys=["image", "label"]),
         ]
     )
@@ -244,11 +245,11 @@ def get_tbad_lab_unlab_transforms(
             monai.transforms.LoadImaged(keys=["image", "label"], image_only=False),
             monai.transforms.EnsureChannelFirstd(keys="image"),
             monai.transforms.EnsureTyped(keys=["image", "label"]),
-            # monai._transforms.CenterSpatialCropD(
+            # monai.transforms.CenterSpatialCropD(
             #     keys=["image", "label"],
             #     roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
             # ),
-            # monai._transforms.NormalizeIntensityd(
+            # monai.transforms.NormalizeIntensityd(
             #     keys="image", nonzero=True, channel_wise=True
             # ),
             monai.transforms.ToTensord(keys=["image", "label"]),
@@ -260,10 +261,10 @@ def get_tbad_lab_unlab_transforms(
             monai.transforms.LoadImaged(keys=["image", "label"], image_only=False),
             monai.transforms.EnsureChannelFirstd(keys="image"),
             monai.transforms.EnsureTyped(keys=["image", "label"]),
-            # monai._transforms.NormalizeIntensityd(
-            #     keys="image", nonzero=True, channel_wise=True
-            # ),
-            # monai._transforms.CenterSpatialCropD(
+            monai.transforms.NormalizeIntensityd(
+                keys="image", nonzero=True, channel_wise=True
+            ),
+            # monai.transforms.CenterSpatialCropD(
             #     keys=["image", "label"],
             #     roi_size=ensure_tuple_rep(config.trainer.image_size, 3),
             # ),
@@ -272,6 +273,41 @@ def get_tbad_lab_unlab_transforms(
     )
     return lab_train_transform, unlab_train_transform, val_transform
 
+
+class RandomCrop(object):
+    """
+    Crop randomly the image in a sample
+    Args:
+    output_size (int): Desired output size
+    """
+
+    def __init__(self, output_size):
+        self.output_size = output_size
+
+    def __call__(self, sample):
+        image, label = sample['image'], sample['label']
+
+        # pad the sample if necessary
+        if label.shape[0] <= self.output_size[0] or label.shape[1] <= self.output_size[1] or label.shape[2] <= \
+                self.output_size[2]:
+            pw = max((self.output_size[0] - label.shape[0]) // 2 + 3, 0)
+            ph = max((self.output_size[1] - label.shape[1]) // 2 + 3, 0)
+            pd = max((self.output_size[2] - label.shape[2]) // 2 + 3, 0)
+            image = np.pad(image, [(pw, pw), (ph, ph), (pd, pd)], mode='constant', constant_values=0)
+            label = np.pad(label, [(pw, pw), (ph, ph), (pd, pd)], mode='constant', constant_values=0)
+
+        (w, h, d) = image.shape
+        # if np.random.uniform() > 0.33:
+        #     w1 = np.random.randint((w - self.output_size[0])//4, 3*(w - self.output_size[0])//4)
+        #     h1 = np.random.randint((h - self.output_size[1])//4, 3*(h - self.output_size[1])//4)
+        # else:
+        w1 = np.random.randint(0, w - self.output_size[0])
+        h1 = np.random.randint(0, h - self.output_size[1])
+        d1 = np.random.randint(0, d - self.output_size[2])
+
+        label = label[w1:w1 + self.output_size[0], h1:h1 + self.output_size[1], d1:d1 + self.output_size[2]]
+        image = image[w1:w1 + self.output_size[0], h1:h1 + self.output_size[1], d1:d1 + self.output_size[2]]
+        return {'image': image, 'label': label}
 
 def get_Acute_transforms(
     config: EasyDict,
@@ -451,7 +487,7 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
     Optional[torch.utils.data.DataLoader],
 ]:
         
-    if data_flag in ["hepatic_vessel2021", "heart"]:
+    if data_flag in ["hepatic_vessel2021"]:
         dataset_images = load_dataset_images(config.data_root)
         train_transform, val_transform = get_MSD_transforms(config)
     else:
@@ -459,7 +495,7 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
             dataset_images = load_brats2019_dataset_images(config.data_root)
             config.trainer.is_brats2019 = True
             train_transform, val_transform = get_Brats_transforms(config)
-        elif data_flag in ["acute", "lung", "lung_big_model"]:
+        elif data_flag in ["acute", "lung", "lung_big_model", "heart"]:
             dataset_images = load_dataset_images(config.data_root)
             train_transform, val_transform = get_Acute_transforms(config)
         elif data_flag in ["tbad_dataset", "aneurysms"]:
@@ -500,6 +536,7 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
     unlabled_ratio = config.trainer.unlabled_ratio
     assert 0.0 <= unlabled_ratio < 1.0, f"unlabled ratio {unlabled_ratio} is not valid"
     if unlabled_ratio > 0.0:
+        print('unlabled_ratio', unlabled_ratio)
 
         unlabeled_length = int(train_length * unlabled_ratio)
         train_length -= unlabeled_length
@@ -507,7 +544,7 @@ def get_dataloader(config: EasyDict, data_flag: str, needs_unlab=False) -> Tuple
         if needs_unlab:
             unlab_dataset = monai.data.Dataset(
                 data=dataset_images[train_indexes[:unlabeled_length]],
-                transform=unlab_train_transform,
+                transform=val_transform,
             )
             unlab_loader = monai.data.DataLoader(
                 unlab_dataset,

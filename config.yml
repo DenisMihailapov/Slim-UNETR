@@ -2,21 +2,22 @@ is_brats2021: False
 is_brain2019: False #True
 is_brain2019_small: False
 is_hepatic_vessel2021: False
-is_heart: False
+is_heart: True
 
 is_acute: False
 
 is_lung: False 
 is_lung_big_model: False
 
-is_tbad_dataset: True
+is_tbad_dataset: False #True
 
-is_aneurysms: False
+is_aneurysms: True
 
 
 
 brats2021:
-  data_root: ../med_data/common/BRaTS2021
+  data_root: ../med_data/common/BraTS2020_gz/TrainingData 
+  device: cuda1
   trainer:
     seed: 50
     num_epochs: 300
@@ -31,12 +32,28 @@ brats2021:
     momentum_teacher: 0.996
     pred_ratio_var: 0
     num_workers: 0
+
+    rot_prob: 0.7
+    rot_angle: 0.62830 # 2*pi/10
+    flip_prob: 0.2
+
+    dice_loss_ratio: 1.
+    focal_class_weights: [0.8, 0.9, 1.5]
+    focal_loss_ratio: 0.8
+    gamma: 2.0
+
+    start_unlab_epoch_ratio: 0.1
+    unlabled_ratio: 0.0
+    unlab_weight: 0.3
+    only_labeled: False
+    use_transform: False
+    
     image_size: 128
-    resume: False
+    resume: True
 
   finetune:
     checkpoint: brain2021
-  
+  model: unet   
   slim_unetr:
     in_channels: 4
     out_channels: 3
@@ -47,9 +64,11 @@ brats2021:
     heads: [ 1, 2, 4, 4 ]
     r: [ 4, 2, 2, 1 ]
     dropout: 0.3
+    use_split_classes: False
 
 brain2019:
   data_root: ../med_data/common/Task01_BrainTumour
+  device: cuda1
   trainer:
     seed: 50
     num_epochs: 300
@@ -65,13 +84,27 @@ brain2019:
     pred_ratio_var: 0
     num_workers: 0
     rot_prob: 0.7
+    rot_angle: 0.62830 # 2*pi/10
+    flip_prob: 0.3
+     
+
+    dice_loss_ratio: 1. 
+    focal_class_weights: [0.8, 0.9, 1.5]
+    focal_loss_ratio: 0.8
+    gamma: 2.0
     
     image_size: 128
     resume: True
 
+    start_unlab_epoch_ratio: 0.1
+    unlabled_ratio: 0.0
+    unlab_weight: 0.3
+    only_labeled: False
+    use_transform: False
+
   finetune:
     checkpoint: brain2019
-  
+  model: unet 
   slim_unetr:
     in_channels: 4
     out_channels: 3
@@ -85,7 +118,7 @@ brain2019:
     
 
 
-brain2019_small:
+brain2019_small_:
   data_root: ../med_data/common/Task01_BrainTumour_small
   trainer:
     seed: 50
@@ -108,7 +141,7 @@ brain2019_small:
 
   finetune:
     checkpoint: brain2019_small
-  
+  model: unet 
   slim_unetr:
     in_channels: 4
     out_channels: 3
@@ -119,6 +152,59 @@ brain2019_small:
     heads: [ 1, 2, 4, 4 ]
     r: [ 4, 2, 2, 2 ]
     dropout: 0.3
+
+
+brain2019_small:
+  data_root: ../med_data/common/Task01_BrainTumour_small
+  device: cuda1
+  trainer:
+    seed: 42
+    num_epochs: 800
+    warmup: 60
+    train_ratio: 0.8
+    batch_size: 4
+    lr: 0.002
+    min_lr: 0.00005
+    optimizer: adamw
+    weight_decay: 0.05
+    weight_decay_end: 0.04
+    momentum_teacher: 0.996
+    pred_ratio_var: 0
+    num_workers: 0
+    rot_prob: 0.7
+    rot_angle: 0.62830 # 2*pi/10
+    flip_prob: 0.3
+
+    dice_loss_ratio: 1.
+    focal_class_weights: [0.8, 0.9, 1.5]
+    focal_loss_ratio: 0.8
+    gamma: 2.0
+
+    start_unlab_epoch_ratio: 0.2
+    unlabled_ratio: 0.5
+    unlab_weight: 0.3
+    only_labeled: False
+    use_transform: False
+    
+    image_size: 128
+    resume: True
+
+
+  finetune:
+    checkpoint: brain2019_small
+
+  slim_unetr:
+    in_channels: 1
+    out_channels: 3
+    embed_dim: 96 
+    embedding_dim: 64 
+    channels: [ 24, 64, 96 ]
+    blocks: [ 2, 3, 4, 3 ]
+    heads: [ 1, 2, 4, 4  ]
+    r: [ 4, 2, 2, 1 ]
+    r_up: [ 4, 2, 2, 2 ]
+    dropout: 0.3    
+    use_split_classes: True
 
 
 hepatic_vessel2021:
@@ -143,7 +229,7 @@ hepatic_vessel2021:
 
   finetune:
     checkpoint: hepatic_vessel
-
+  model: unet 
   slim_unetr:
     in_channels: 1
     out_channels: 2
@@ -157,7 +243,8 @@ hepatic_vessel2021:
 
 
 heart:
-  data_root: ../med_data/common/Task02_Heart
+  data_root: ../med_data/common/Task02_Heart_new 
+  device: cuda1
   trainer:
     seed: 50
     num_epochs: 1000
@@ -173,16 +260,31 @@ heart:
     pred_ratio_var: 0
     num_workers: 0
     rot_prob: 0.7
+
+    rot_angle: 0.62830 # 2*pi/10
+    flip_prob: 0.2
+
+    dice_loss_ratio: 1.
+    focal_loss_ratio: 0.8
+    gamma: 2.0
+
+    start_unlab_epoch_ratio: 0.2
+    unlabled_ratio: 0.0
+    unlab_weight: 0.3
+    only_labeled: False
+    use_transform: False
     
-    image_size: 96
+    
+    image_size: 128
     resume: False
 
   finetune:
     checkpoint: heart
 
+  model: unet 
   slim_unetr:
     in_channels: 1
-    out_channels: 2
+    out_channels: 1
     embed_dim: 96 
     embedding_dim: 27 
     channels: [ 24, 48, 60 ]
@@ -215,7 +317,7 @@ acute:
 
   finetune:
     checkpoint: acute
-
+  model: unet 
   slim_unetr:
     in_channels: 1
     out_channels: 1
@@ -252,7 +354,7 @@ lung:
 
   finetune:
     checkpoint: lung
-
+  model: unet 
   slim_unetr:
     in_channels: 1
     out_channels: 1
@@ -289,7 +391,7 @@ lung_big_model:
 
   finetune:
     checkpoint: lung_big_blocks
-
+  model: unet 
   slim_unetr:
     in_channels: 1
     out_channels: 1
@@ -306,7 +408,7 @@ tbad_dataset:
   data_root: ../med_data/common/imageTBAD_MSD_preproc_128_border_crop64
   device: cuda1
   trainer:
-    seed: 32
+    seed: 42
     num_epochs: 800
     warmup: 60
     train_ratio: 0.8
@@ -328,7 +430,7 @@ tbad_dataset:
     focal_loss_ratio: 0.8
     gamma: 2.0
 
-    start_unlab_epoch: 30
+    start_unlab_epoch_ratio: 0.2
     unlabled_ratio: 0.5
     unlab_weight: 0.3
     only_labeled: False
@@ -340,7 +442,7 @@ tbad_dataset:
 
   finetune:
     checkpoint: tbad_dataset
-
+  model: unet 
   slim_unetr:
     in_channels: 1
     out_channels: 3
@@ -356,14 +458,14 @@ tbad_dataset:
 
 
 aneurysms:
-  data_root: ../med_data/ai_aneurysms_msd_crop320_rs128_selected_74
+  data_root: ../med_data/new_nii_segmented_all197_crop320_rs128_source_aff
   device: cuda1
   trainer:
-    seed: 42
-    num_epochs: 600
+    seed: 25
+    num_epochs: 800
     warmup: 60
     train_ratio: 0.8
-    batch_size: 8
+    batch_size: 4
     lr: 0.002
     min_lr: 0.00005
     optimizer: adamw
@@ -381,7 +483,7 @@ aneurysms:
     focal_loss_ratio: 0.8
     gamma: 2.0
 
-    start_unlab_epoch: 30
+    start_unlab_epoch_ratio: 0.2
     unlabled_ratio: 0.0
     unlab_weight: 0.3
     only_labeled: False
@@ -393,7 +495,7 @@ aneurysms:
 
   finetune:
     checkpoint: aneurysms
-
+  model: unet 
   slim_unetr:
     in_channels: 1
     out_channels: 1
